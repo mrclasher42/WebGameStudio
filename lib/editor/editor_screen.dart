@@ -1,27 +1,23 @@
+import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import '../models/game_object.dart';
-import '../models/game_project.dart';
-import '../models/game_type.dart';
-import '../runtime/game_runtime.dart';
-import '../services/project_storage.dart';
-import 'editor_tools.dart';
-import 'project_type_screen.dart';
+import 'package:code_text_field/code_text_field.dart';
+import 'package:flutter_highlight/themes/monokai-sublime.dart';
+import 'package:highlight/languages/xml.dart' as xml;
+import 'package:highlight/languages/css.dart' as css;
+import 'package:highlight/languages/javascript.dart' as javascript;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+import '../models/project.dart';
 
 class EditorScreen extends StatefulWidget {
-  final bool arabic;
-  final bool darkMode;
-  final ValueChanged<bool> onLanguageChanged;
-  final ValueChanged<bool> onThemeChanged;
+  final Project project;
+  final VoidCallback onSaved;
 
   const EditorScreen({
     super.key,
-    required this.arabic,
-    required this.darkMode,
-    required this.onLanguageChanged,
-    required this.onThemeChanged,
+    required this.project,
+    required this.onSaved,
   });
 
   @override
@@ -29,632 +25,251 @@ class EditorScreen extends StatefulWidget {
 }
 
 class _EditorScreenState extends State<EditorScreen> {
-  GameProject project = GameProject();
-  int sceneIndex = 0;
-  String? selectedId;
-  String codeTab = 'HTML';
+  late CodeController htmlController;
+  late CodeController cssController;
+  late CodeController jsController;
+  late WebViewController webController;
 
-  GameScene get scene => project.scenes[sceneIndex];
-
-  GameObject? get selected {
-    for (final object in scene.objects) {
-      if (object.id == selectedId) return object;
-    }
-    return null;
-  }
+  int selectedTab = 0;
+  Timer? previewTimer;
 
   @override
   void initState() {
     super.initState();
-    _load();
+
+    htmlController = CodeController(
+      text: widget.project.html,
+      language: xml.xml,
+      theme: monokaiSublimeTheme,
+    );
+
+    cssController = CodeController(
+      text: widget.project.css,
+      language: css.css,
+      theme: monokaiSublimeTheme,
+    );
+
+    jsController = CodeController(
+      text: widget.project.js,
+      language: javascript.javascript,
+      theme: monokaiSublimeTheme,
+    );
+
+    htmlController.addListener(schedulePreview);
+    cssController.addListener(schedulePreview);
+    jsController.addListener(schedulePreview);
+
+    webController = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted);
+
+    loadPreview();
   }
 
-  Future<void> _load() async {
-    final saved = await ProjectStorage.load();
+  @override
+  void dispose() {
+    previewTimer?.cancel();
+    htmlController.dispose();
+    cssController.dispose();
+    jsController.dispose();
+    super.dispose();
+  }
+
+  void schedulePreview() {
+    previewTimer?.cancel();
+    previewTimer = Timer(
+      const Duration(milliseconds: 350),
+      loadPreview,
+    );
+  }
+
+  Future<void> loadPreview() async {
+    final html = htmlController.text;
+    final cssCode = cssController.text;
+    final jsCode = jsController.text;
+
+    final document = '''
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+$cssCode
+</style>
+</head>
+<body>
+$html
+<script>
+try {
+$jsCode
+} catch (error) {
+document.body.insertAdjacentHTML(
+'beforeend',
+'<pre style="color:red;padding:16px;">' + error + '</pre>'
+);
+}
+</script>
+</body>
+</html>
+''';
+
+    await webController.loadHtmlString(document);
+  }
+
+  Future<void> saveProject() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList('projects') ?? [];
+
+    final updated = Project(
+      name: widget.project.name,
+      html: htmlController.text,
+      css: cssController.text,
+      js: jsController.text,
+    );
+
+    for (int i = 0; i < list.length; i++) {
+      final data = jsonDecode(list[i]);
+      final project = Project.fromJson(
+        Map<String, dynamic>.from(data),
+      );
+
+      if (project.name == widget.project.name) {
+        list[i] = jsonEncode(updated.toJson());
+        await prefs.setStringList('projects', list);
+        widget.onSaved();
+
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Project saved ✓'),
+            duration: Duration(milliseconds: 900),
+          ),
+        );
+        return;
+      }
+    }
+
+    list.add(jsonEncode(updated.toJson()));
+    await prefs.setStringList('projects', list);
+    widget.onSaved();
+
     if (!mounted) return;
 
-    if (saved != null) {
-      setState(() {
-        project = saved;
-      });
-    }
-  }
-
-  void _newProject(GameType type) {
-    setState(() {
-      project = GameProject(
-        name: 'My Game',
-        gameType: type,
-      );
-      sceneIndex = 0;
-      selectedId = null;
-    });
-  }
-
-  void _addObject(String type) {
-    final id = '${type}_${DateTime.now().millisecondsSinceEpoch}';
-
-    final object = GameObject(
-      id: id,
-      name: type,
-      type: type,
-      x: 100 + scene.objects.length * 15.0,
-      y: 100 + scene.objects.length * 15.0,
-      html: _defaultHtml(type),
-      css: _defaultCss(type),
-    );
-
-    setState(() {
-      scene.objects.add(object);
-      selectedId = id;
-    });
-  }
-
-  String _defaultHtml(String type) {
-    switch (type) {
-      case 'text':
-        return '<span>Text</span>';
-      case 'button':
-        return '<button class="wgs-button">Button</button>';
-      case 'character':
-        return '<div class="character-body"></div>';
-      case 'platform':
-        return '<div class="platform-body"></div>';
-      case 'enemy':
-        return '<div class="enemy-body"></div>';
-      case 'coin':
-        return '<div class="coin-body"></div>';
-      case 'input':
-        return '<input placeholder="Type here">';
-      case 'panel':
-        return '<div class="panel-body"></div>';
-      case 'image':
-        return '<div>Image</div>';
-      default:
-        return '<div></div>';
-    }
-  }
-
-  String _defaultCss(String type) {
-    switch (type) {
-      case 'text':
-        return 'font-size:28px;color:white;';
-      case 'button':
-        return 'background:#4f7cff;color:white;border:0;border-radius:12px;padding:14px 25px;font-size:18px;';
-      case 'character':
-        return 'width:100%;height:100%;background:#ff5252;border-radius:12px;';
-      case 'platform':
-        return 'width:100%;height:100%;background:#555;border-radius:8px;';
-      case 'enemy':
-        return 'width:100%;height:100%;background:#9c27b0;border-radius:14px;';
-      case 'coin':
-        return 'width:60%;height:60%;margin:20%;background:#ffd54f;border-radius:50%;';
-      case 'input':
-        return 'width:100%;height:100%;box-sizing:border-box;font-size:18px;padding:10px;';
-      case 'panel':
-        return 'width:100%;height:100%;background:rgba(255,255,255,.08);border-radius:16px;';
-      default:
-        return 'width:100%;height:100%;background:#2d3442;border-radius:12px;';
-    }
-  }
-
-  void _deleteSelected() {
-    if (selectedId == null) return;
-
-    setState(() {
-      scene.objects.removeWhere((e) => e.id == selectedId);
-      selectedId = null;
-    });
-  }
-
-  Future<void> _pickSound() async {
-    final object = selected;
-    if (object == null) return;
-
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.audio,
-      withData: true,
-    );
-
-    if (result == null || result.files.isEmpty) return;
-
-    final file = result.files.single;
-    final bytes = file.bytes ?? await File(file.path!).readAsBytes();
-    final extension = file.extension ?? 'mp3';
-    final mime = extension == 'wav' ? 'audio/wav' : 'audio/mpeg';
-
-    setState(() {
-      object.sound = 'data:$mime;base64,${base64Encode(bytes)}';
-    });
-  }
-
-  void _showCodeEditor() {
-    final object = selected;
-    if (object == null) return;
-
-    final controller = TextEditingController(
-      text: codeTab == 'HTML'
-          ? object.html
-          : codeTab == 'CSS'
-              ? object.css
-              : object.logic,
-    );
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      builder: (_) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            return SizedBox(
-              height: MediaQuery.of(context).size.height * .85,
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      const SizedBox(width: 16),
-                      Text(
-                        object.name,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: SegmentedButton<String>(
-                      segments: const [
-                        ButtonSegment(value: 'HTML', label: Text('HTML')),
-                        ButtonSegment(value: 'CSS', label: Text('CSS')),
-                        ButtonSegment(value: 'Logic', label: Text('Logic')),
-                      ],
-                      selected: {codeTab},
-                      onSelectionChanged: (value) {
-                        setSheetState(() {
-                          codeTab = value.first;
-                          controller.text = codeTab == 'HTML'
-                              ? object.html
-                              : codeTab == 'CSS'
-                                  ? object.css
-                                  : object.logic;
-                        });
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  if (codeTab == 'Logic')
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 16),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'onKey("ArrowRight", player => player.moveX(5));\nonTap(player => player.moveY(-20));\nonUpdate(player => player.moveX(1));\nonStart(player => player.show());',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                      ),
-                    ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: TextField(
-                        controller: controller,
-                        expands: true,
-                        maxLines: null,
-                        minLines: null,
-                        textAlignVertical: TextAlignVertical.top,
-                        style: const TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 14,
-                        ),
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
-                          alignLabelWithHint: true,
-                        ),
-                        onChanged: (value) {
-                          setState(() {
-                            if (codeTab == 'HTML') {
-                              object.html = value;
-                            } else if (codeTab == 'CSS') {
-                              object.css = value;
-                            } else {
-                              object.logic = value;
-                            }
-                          });
-                        },
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _showInspector() {
-    final object = selected;
-    if (object == null) return;
-
-    final name = TextEditingController(text: object.name);
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 18,
-            right: 18,
-            top: 18,
-            bottom: MediaQuery.of(context).viewInsets.bottom + 18,
-          ),
-          child: StatefulBuilder(
-            builder: (context, setSheetState) {
-              return SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Inspector',
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                    const SizedBox(height: 15),
-                    TextField(
-                      controller: name,
-                      decoration: const InputDecoration(
-                        labelText: 'Name',
-                        border: OutlineInputBorder(),
-                      ),
-                      onChanged: (value) {
-                        object.name = value;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    _numberField(
-                      'X',
-                      object.x,
-                      (value) => setState(() => object.x = value),
-                    ),
-                    _numberField(
-                      'Y',
-                      object.y,
-                      (value) => setState(() => object.y = value),
-                    ),
-                    _numberField(
-                      'Width',
-                      object.width,
-                      (value) => setState(() => object.width = value),
-                    ),
-                    _numberField(
-                      'Height',
-                      object.height,
-                      (value) => setState(() => object.height = value),
-                    ),
-                    const SizedBox(height: 10),
-                    FilledButton.icon(
-                      onPressed: _showCodeEditor,
-                      icon: const Icon(Icons.code),
-                      label: const Text('HTML / CSS / Logic'),
-                    ),
-                    const SizedBox(height: 8),
-                    OutlinedButton.icon(
-                      onPressed: _pickSound,
-                      icon: const Icon(Icons.music_note),
-                      label: Text(
-                        object.sound.isEmpty
-                            ? 'Add Sound'
-                            : 'Sound Added',
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _deleteSelected();
-                      },
-                      icon: const Icon(Icons.delete),
-                      label: const Text('Delete'),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _numberField(
-    String label,
-    double value,
-    ValueChanged<double> onChanged,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: TextField(
-        keyboardType: TextInputType.number,
-        controller: TextEditingController(text: value.toStringAsFixed(0)),
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-        ),
-        onChanged: (text) {
-          final parsed = double.tryParse(text);
-          if (parsed != null) onChanged(parsed);
-        },
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Project saved ✓'),
+        duration: Duration(milliseconds: 900),
       ),
     );
   }
 
-  Widget _canvas() {
-    return InteractiveViewer(
-      minScale: .25,
-      maxScale: 2.5,
-      boundaryMargin: const EdgeInsets.all(500),
-      child: Container(
-        width: project.width,
-        height: project.height,
-        decoration: BoxDecoration(
-          color: const Color(0xff151923),
-          border: Border.all(color: Colors.white24),
-        ),
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: CustomPaint(
-                painter: _GridPainter(),
-              ),
-            ),
-            ...scene.objects.map(_canvasObject),
-          ],
-        ),
+  Widget buildEditor() {
+    final controller = selectedTab == 0
+        ? htmlController
+        : selectedTab == 1
+            ? cssController
+            : jsController;
+
+    return CodeTheme(
+      data: const CodeThemeData(
+        styles: monokaiSublimeTheme,
       ),
-    );
-  }
-
-  Widget _canvasObject(GameObject object) {
-    final isSelected = object.id == selectedId;
-
-    return Positioned(
-      left: object.x,
-      top: object.y,
-      width: object.width,
-      height: object.height,
-      child: GestureDetector(
-        onTap: () {
-          setState(() {
-            selectedId = object.id;
-          });
-        },
-        onPanUpdate: (details) {
-          setState(() {
-            object.x += details.delta.dx;
-            object.y += details.delta.dy;
-          });
-        },
-        child: Transform.rotate(
-          angle: object.rotation * 0.0174533,
-          child: Container(
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: isSelected ? Colors.blueAccent : Colors.white24,
-                width: isSelected ? 2 : 1,
-              ),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Stack(
-              children: [
-                Center(
-                  child: Text(
-                    object.name,
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-                if (isSelected)
-                  const Positioned(
-                    right: 2,
-                    top: 2,
-                    child: Icon(
-                      Icons.open_in_new,
-                      size: 14,
-                      color: Colors.blueAccent,
-                    ),
-                  ),
-              ],
-            ),
-          ),
+      child: CodeField(
+        controller: controller,
+        background: const Color(0xFF0B0E14),
+        cursorColor: const Color(0xFF9B83FF),
+        textStyle: const TextStyle(
+          fontFamily: 'monospace',
+          fontSize: 14,
+          height: 1.5,
         ),
+        lineNumbers: true,
+        wrap: false,
+        expands: true,
+        padding: const EdgeInsets.all(14),
+        decoration: const BoxDecoration(),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final tools = EditorTools.forType(project.gameType);
-
     return Scaffold(
+      backgroundColor: const Color(0xFF080A0F),
       appBar: AppBar(
-        title: Text(project.name),
+        backgroundColor: const Color(0xFF0D1017),
+        title: Text(
+          widget.project.name,
+          style: const TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
         actions: [
           IconButton(
-            tooltip: 'New',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => ProjectTypeScreen(
-                    arabic: widget.arabic,
-                    onSelected: _newProject,
-                  ),
-                ),
-              );
-            },
-            icon: const Icon(Icons.add),
+            onPressed: loadPreview,
+            icon: const Icon(Icons.refresh),
           ),
           IconButton(
-            tooltip: 'Save',
-            onPressed: () async {
-              await ProjectStorage.save(project);
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Project saved')),
-              );
-            },
-            icon: const Icon(Icons.save),
-          ),
-          IconButton(
-            tooltip: 'Preview',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => GameRuntime(project: project),
-                ),
-              );
-            },
-            icon: const Icon(Icons.play_arrow),
+            onPressed: saveProject,
+            icon: const Icon(Icons.save_outlined),
           ),
         ],
       ),
       body: Column(
         children: [
-          SizedBox(
-            height: 58,
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              scrollDirection: Axis.horizontal,
-              itemCount: tools.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (context, index) {
-                final tool = tools[index];
-
-                return FilledButton.tonalIcon(
-                  onPressed: () => _addObject(tool.id),
-                  icon: Icon(tool.icon),
-                  label: Text(tool.title),
-                );
-              },
-            ),
-          ),
-          Expanded(
+          Container(
+            height: 48,
+            color: const Color(0xFF0D1017),
             child: Row(
               children: [
-                Expanded(child: _canvas()),
-                Container(
-                  width: 270,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    border: Border(
-                      left: BorderSide(
-                        color: Theme.of(context).dividerColor,
-                      ),
-                    ),
-                  ),
-                  child: selected == null
-                      ? const Center(
-                          child: Text(
-                            'Select an object',
-                            textAlign: TextAlign.center,
-                          ),
-                        )
-                      : ListView(
-                          children: [
-                            Text(
-                              selected!.name,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .headlineSmall,
-                            ),
-                            const SizedBox(height: 15),
-                            FilledButton.icon(
-                              onPressed: _showInspector,
-                              icon: const Icon(Icons.tune),
-                              label: const Text('Inspector'),
-                            ),
-                            const SizedBox(height: 8),
-                            OutlinedButton.icon(
-                              onPressed: _showCodeEditor,
-                              icon: const Icon(Icons.code),
-                              label: const Text('Edit Code'),
-                            ),
-                            const SizedBox(height: 8),
-                            OutlinedButton.icon(
-                              onPressed: _pickSound,
-                              icon: const Icon(Icons.volume_up),
-                              label: const Text('Sound'),
-                            ),
-                            const SizedBox(height: 20),
-                            Text(
-                              'Type: ${selected!.type}',
-                              style: const TextStyle(color: Colors.white60),
-                            ),
-                            Text(
-                              'X: ${selected!.x.toStringAsFixed(0)}',
-                              style: const TextStyle(color: Colors.white60),
-                            ),
-                            Text(
-                              'Y: ${selected!.y.toStringAsFixed(0)}',
-                              style: const TextStyle(color: Colors.white60),
-                            ),
-                          ],
-                        ),
-                ),
+                tabButton('HTML', 0),
+                tabButton('CSS', 1),
+                tabButton('JS', 2),
+                tabButton('Preview', 3),
               ],
             ),
           ),
+          Expanded(
+            child: selectedTab == 3
+                ? Container(
+                    color: Colors.white,
+                    child: WebViewWidget(controller: webController),
+                  )
+                : buildEditor(),
+          ),
         ],
       ),
-      floatingActionButton: selected == null
-          ? null
-          : FloatingActionButton(
-              onPressed: _deleteSelected,
-              child: const Icon(Icons.delete),
-            ),
     );
   }
-}
 
-class _GridPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white.withOpacity(.035)
-      ..strokeWidth = 1;
+  Widget tabButton(String title, int index) {
+    final active = selectedTab == index;
 
-    const step = 40.0;
-
-    for (double x = 0; x <= size.width; x += step) {
-      canvas.drawLine(
-        Offset(x, 0),
-        Offset(x, size.height),
-        paint,
-      );
-    }
-
-    for (double y = 0; y <= size.height; y += step) {
-      canvas.drawLine(
-        Offset(0, y),
-        Offset(size.width, y),
-        paint,
-      );
-    }
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => selectedTab = index),
+        child: Container(
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: active
+                    ? const Color(0xFF9B83FF)
+                    : Colors.transparent,
+                width: 2,
+              ),
+            ),
+          ),
+          child: Text(
+            title,
+            style: TextStyle(
+              color: active ? Colors.white : Colors.white54,
+              fontWeight: active ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
+        ),
+      ),
+    );
   }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
