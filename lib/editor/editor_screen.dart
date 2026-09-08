@@ -40,9 +40,10 @@ class _EditorScreenState extends State<EditorScreen> {
   bool singleFileMode = false;
   bool settingsLoaded = false;
   bool isSaving = false;
+  bool hasChanges = false;
 
-  Timer? previewTimer;
   Timer? autoSaveTimer;
+  Timer? previewTimer;
 
   @override
   void initState() {
@@ -75,22 +76,12 @@ class _EditorScreenState extends State<EditorScreen> {
     if (!mounted) return;
 
     if (enabled) {
-      final combined = '''${widget.project.html}
-
-<style>
-${widget.project.css}
-</style>
-
-<script>
-${widget.project.js}
-</script>''';
-
       singleController = CodeController(
-        text: combined,
+        text: widget.project.html,
         language: xml.xml,
       );
 
-      singleController!.addListener(scheduleAutoSave);
+      singleController!.addListener(markChanged);
       singleController!.addListener(schedulePreview);
     } else {
       htmlController = CodeController(
@@ -108,9 +99,9 @@ ${widget.project.js}
         language: javascript.javascript,
       );
 
-      htmlController!.addListener(scheduleAutoSave);
-      cssController!.addListener(scheduleAutoSave);
-      jsController!.addListener(scheduleAutoSave);
+      htmlController!.addListener(markChanged);
+      cssController!.addListener(markChanged);
+      jsController!.addListener(markChanged);
 
       htmlController!.addListener(schedulePreview);
       cssController!.addListener(schedulePreview);
@@ -123,12 +114,19 @@ ${widget.project.js}
     });
   }
 
+  void markChanged() {
+    hasChanges = true;
+    scheduleAutoSave();
+  }
+
   void scheduleAutoSave() {
     autoSaveTimer?.cancel();
 
     autoSaveTimer = Timer(
-      const Duration(milliseconds: 700),
-      saveProject,
+      const Duration(milliseconds: 600),
+      () {
+        saveProject(showMessage: false);
+      },
     );
   }
 
@@ -165,6 +163,88 @@ ${widget.project.js}
     }
 
     return jsController?.text ?? '';
+  }
+
+  Future<void> saveProject({
+    bool showMessage = false,
+  }) async {
+    if (isSaving) return;
+
+    isSaving = true;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final projects = prefs.getStringList('projects') ?? [];
+
+      final updatedProject = Project(
+        name: widget.project.name,
+        html: getCurrentHtml(),
+        css: getCurrentCss(),
+        js: getCurrentJs(),
+      );
+
+      final encoded = jsonEncode(updatedProject.toJson());
+
+      int foundIndex = -1;
+
+      for (var i = 0; i < projects.length; i++) {
+        try {
+          final decoded = jsonDecode(projects[i]);
+
+          if (decoded is Map &&
+              decoded['name']?.toString() == widget.project.name) {
+            foundIndex = i;
+            break;
+          }
+        } catch (_) {}
+      }
+
+      if (foundIndex >= 0) {
+        projects[foundIndex] = encoded;
+      } else {
+        projects.insert(0, encoded);
+      }
+
+      await prefs.setStringList('projects', projects);
+
+      hasChanges = false;
+
+      widget.onSaved?.call();
+
+      if (showMessage && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تم الحفظ تلقائيًا ✓'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(milliseconds: 1200),
+          ),
+        );
+      }
+    } finally {
+      isSaving = false;
+    }
+  }
+
+  Future<void> openPreview() async {
+    await saveProject();
+
+    if (!mounted) return;
+
+    setState(() {
+      previewMode = true;
+    });
+
+    await loadPreview();
+  }
+
+  Future<void> closeEditor() async {
+    autoSaveTimer?.cancel();
+
+    await saveProject();
+
+    if (!mounted) return;
+
+    Navigator.pop(context);
   }
 
   String buildPreviewDocument() {
@@ -228,6 +308,7 @@ $html
 
   function showError(message) {
     if (!errorBox) return;
+
     errorBox.textContent = message;
     errorBox.style.display = 'block';
   }
@@ -238,6 +319,7 @@ $html
       String(message || 'Unknown error') +
       (line ? '\\nLine: ' + line : '')
     );
+
     return true;
   };
 
@@ -327,6 +409,7 @@ $html
 
   function showError(message) {
     if (!errorBox) return;
+
     errorBox.textContent = message;
     errorBox.style.display = 'block';
   }
@@ -337,6 +420,7 @@ $html
       String(message || 'Unknown error') +
       (line ? '\\nLine: ' + line : '')
     );
+
     return true;
   };
 
@@ -345,7 +429,7 @@ $html
       'Promise Error\\n' +
       String(event.reason || 'Unknown promise error')
     );
-  });
+  };
 
   const originalConsoleError = console.error;
 
@@ -390,74 +474,13 @@ $html
     webViewController.runJavaScript('''
       (function() {
         var box = document.getElementById("wgs-error");
+
         if (!box) return;
+
         box.textContent = ${jsonEncode(message)};
         box.style.display = "block";
       })();
     ''');
-  }
-
-  Future<void> saveProject() async {
-    if (isSaving) return;
-
-    isSaving = true;
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final projects = prefs.getStringList('projects') ?? [];
-
-      final updatedProject = Project(
-        name: widget.project.name,
-        html: getCurrentHtml(),
-        css: getCurrentCss(),
-        js: getCurrentJs(),
-      );
-
-      final encoded = jsonEncode(updatedProject.toJson());
-
-      final index = projects.indexWhere((item) {
-        try {
-          final decoded = jsonDecode(item);
-
-          return decoded is Map &&
-              decoded['name'] == updatedProject.name;
-        } catch (_) {
-          return false;
-        }
-      });
-
-      if (index >= 0) {
-        projects[index] = encoded;
-      } else {
-        projects.add(encoded);
-      }
-
-      await prefs.setStringList('projects', projects);
-
-      widget.onSaved?.call();
-    } finally {
-      isSaving = false;
-    }
-  }
-
-  Future<void> openPreview() async {
-    await saveProject();
-
-    if (!mounted) return;
-
-    setState(() {
-      previewMode = true;
-    });
-
-    await loadPreview();
-  }
-
-  void closePreview() {
-    previewTimer?.cancel();
-
-    setState(() {
-      previewMode = false;
-    });
   }
 
   Widget buildCodeEditor() {
@@ -657,6 +680,14 @@ $html
     );
   }
 
+  void closePreview() {
+    previewTimer?.cancel();
+
+    setState(() {
+      previewMode = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!settingsLoaded) {
@@ -675,39 +706,107 @@ $html
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          widget.project.name,
-          style: const TextStyle(
-            fontWeight: FontWeight.w700,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+
+        await closeEditor();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            onPressed: closeEditor,
+            icon: const Icon(Icons.arrow_back_rounded),
           ),
+          title: Text(
+            widget.project.name,
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          actions: [
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: hasChanges
+                  ? Padding(
+                      key: const ValueKey('saving'),
+                      padding: const EdgeInsets.only(right: 14),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.cloud_upload_outlined,
+                            size: 17,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            'Saving',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : Padding(
+                      key: const ValueKey('saved'),
+                      padding: const EdgeInsets.only(right: 14),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.cloud_done_rounded,
+                            size: 17,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .primary,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            'Saved',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+            ),
+            IconButton(
+              onPressed: openPreview,
+              icon: const Icon(Icons.play_arrow_rounded),
+            ),
+          ],
         ),
-        actions: [
-          IconButton(
-            onPressed: openPreview,
-            icon: const Icon(Icons.play_arrow_rounded),
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          buildTabs(),
-          buildCodeEditor(),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: openPreview,
-        icon: const Icon(Icons.play_arrow_rounded),
-        label: const Text('Preview'),
+        body: Column(
+          children: [
+            buildTabs(),
+            buildCodeEditor(),
+          ],
+        ),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: openPreview,
+          icon: const Icon(Icons.play_arrow_rounded),
+          label: const Text('Preview'),
+        ),
       ),
     );
   }
 
   @override
   void dispose() {
-    previewTimer?.cancel();
     autoSaveTimer?.cancel();
+    previewTimer?.cancel();
 
     htmlController?.dispose();
     cssController?.dispose();

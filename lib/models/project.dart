@@ -22,10 +22,10 @@ class Project {
 
   factory Project.fromJson(Map<String, dynamic> json) {
     return Project(
-      name: json['name'] ?? 'Untitled',
-      html: json['html'] ?? '',
-      css: json['css'] ?? '',
-      js: json['js'] ?? '',
+      name: json['name']?.toString() ?? 'Untitled',
+      html: json['html']?.toString() ?? '',
+      css: json['css']?.toString() ?? '',
+      js: json['js']?.toString() ?? '',
     );
   }
 }
