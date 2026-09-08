@@ -1,10 +1,10 @@
-name: Build APK
+name: Build Android APK
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build:
@@ -17,21 +17,31 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.35.4"
+          flutter-version: 3.35.4
           channel: stable
           cache: true
 
-      - name: Create Android project
+      - name: Create Flutter Android project
         run: flutter create --platforms=android --project-name web_game_studio .
 
-      - name: Get dependencies
+      - name: Get Flutter dependencies
         run: flutter pub get
 
-      - name: Build APK
+      - name: Prepare Python server package
+        run: |
+          mkdir -p assets/python
+          SERIOUS_PYTHON_VERSION=3.12 dart run serious_python:main package python/server -p Android
+
+      - name: Verify Python package
+        run: |
+          test -f assets/python/app.zip
+          ls -lh assets/python/app.zip
+
+      - name: Build release APK
         run: flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: WebGameStudio-APK
+          name: web-game-studio-apk
           path: build/app/outputs/flutter-apk/app-release.apk

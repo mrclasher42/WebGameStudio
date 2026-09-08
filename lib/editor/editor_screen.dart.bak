@@ -788,18 +788,6 @@ $html
             ],
           ),
           actions: [
-            IconButton(
-              tooltip: _lanServerRunning
-                  ? 'إيقاف LAN Server'
-                  : 'تشغيل LAN Server',
-              onPressed: _toggleLanServer,
-              icon: Icon(
-                _lanServerRunning
-                    ? Icons.wifi_tethering
-                    : Icons.wifi_tethering_off,
-              ),
-            ),
-
             TextButton.icon(
               onPressed: () async {
                 await Clipboard.setData(

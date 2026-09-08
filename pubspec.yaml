@@ -14,6 +14,8 @@ dependencies:
   code_text_field: ^1.1.0
   flutter_highlight: ^0.7.0
   cupertino_icons: ^1.0.8
+  path_provider: ^2.1.5
+  serious_python: 2.0.0
 
 dev_dependencies:
   flutter_test:
@@ -22,3 +24,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/python/app.zip
