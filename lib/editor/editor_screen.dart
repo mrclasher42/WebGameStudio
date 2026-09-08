@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:code_text_field/code_text_field.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_highlight/themes/monokai-sublime.dart';
@@ -8,16 +9,15 @@ import 'package:highlight/languages/javascript.dart' as javascript;
 import 'package:highlight/languages/xml.dart' as xml;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+
 import '../models/project.dart';
 
 class EditorScreen extends StatefulWidget {
   final Project project;
-  final VoidCallback onSaved;
 
   const EditorScreen({
     super.key,
     required this.project,
-    required this.onSaved,
   });
 
   @override
@@ -25,10 +25,11 @@ class EditorScreen extends StatefulWidget {
 }
 
 class _EditorScreenState extends State<EditorScreen> {
-  late CodeController htmlController;
-  late CodeController cssController;
-  late CodeController jsController;
-  late WebViewController webController;
+  late final CodeController htmlController;
+  late final CodeController cssController;
+  late final CodeController jsController;
+
+  late final WebViewController webViewController;
 
   int selectedTab = 0;
   bool previewMode = false;
@@ -57,118 +58,84 @@ class _EditorScreenState extends State<EditorScreen> {
     cssController.addListener(schedulePreview);
     jsController.addListener(schedulePreview);
 
-    webController = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted);
+    webViewController = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.black)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onWebResourceError: (error) {
+            if (!mounted || !previewMode) return;
 
-    loadPreview();
-  }
-
-  @override
-  void dispose() {
-    previewTimer?.cancel();
-    htmlController.dispose();
-    cssController.dispose();
-    jsController.dispose();
-    super.dispose();
+            if (error.isForMainFrame == true) {
+              showPreviewError(
+                'تعذر تحميل محتوى المعاينة.\n${error.description}',
+              );
+            }
+          },
+        ),
+      );
   }
 
   void schedulePreview() {
+    if (!previewMode) return;
+
     previewTimer?.cancel();
+
     previewTimer = Timer(
       const Duration(milliseconds: 350),
       loadPreview,
     );
   }
 
-  Future<void> loadPreview() async {
+  String buildPreviewDocument() {
     final html = htmlController.text;
     final cssCode = cssController.text;
     final jsCode = jsController.text;
 
     final safeJs = jsonEncode(jsCode);
 
-    final document = '''
+    return '''
 <!DOCTYPE html>
 <html>
 <head>
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
-html,
-body {
+html, body {
   margin: 0;
   padding: 0;
   width: 100%;
-  min-height: 100%;
+  height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
   -webkit-user-select: none;
   user-select: none;
-  -webkit-touch-callout: none;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 $cssCode
 
 #wgs-error {
   position: fixed;
+  left: 14px;
+  right: 14px;
+  top: 14px;
   z-index: 999999;
-  inset: 0;
   display: none;
-  align-items: center;
-  justify-content: center;
-  padding: 22px;
-  background: rgba(5, 7, 12, 0.96);
-  color: white;
-  font-family: Arial, sans-serif;
-}
-
-#wgs-error-box {
-  width: 100%;
-  max-width: 430px;
-  padding: 22px;
-  border-radius: 20px;
-  background: #151923;
-  border: 1px solid #3a404d;
-  box-shadow: 0 20px 60px rgba(0,0,0,.45);
-}
-
-#wgs-error-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
-  font-size: 19px;
-  font-weight: 700;
-}
-
-#wgs-error-icon {
-  width: 34px;
-  height: 34px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 10px;
-  background: rgba(255, 70, 100, .14);
-  color: #ff526f;
-  font-size: 19px;
-}
-
-#wgs-error-message {
-  margin: 0;
-  padding: 14px;
-  border-radius: 12px;
-  background: #0b0e14;
-  color: #ff8da0;
-  font-family: monospace;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(20, 20, 24, 0.96);
+  color: #ff6b6b;
+  font-family: sans-serif;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.5;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  border: 1px solid rgba(255,107,107,.35);
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-#wgs-error-label {
-  margin-top: 13px;
-  color: #858b98;
-  font-size: 12px;
 }
 </style>
 </head>
@@ -176,70 +143,55 @@ $cssCode
 
 $html
 
-<div id="wgs-error">
-  <div id="wgs-error-box">
-    <div id="wgs-error-title">
-      <div id="wgs-error-icon">!</div>
-      JavaScript Error
-    </div>
-    <pre id="wgs-error-message"></pre>
-    <div id="wgs-error-label">
-      Fix the code and the preview will update automatically.
-    </div>
-  </div>
-</div>
+<div id="wgs-error"></div>
 
 <script>
-(function() {
-  const errorBox = document.getElementById("wgs-error");
-  const errorMessage = document.getElementById("wgs-error-message");
+(function () {
+  const errorBox = document.getElementById('wgs-error');
 
   function showError(message) {
-    errorMessage.textContent = String(message);
-    errorBox.style.display = "flex";
+    if (!errorBox) return;
+
+    errorBox.textContent = message;
+    errorBox.style.display = 'block';
   }
 
-  window.addEventListener("error", function(event) {
-    if (event.error) {
-      showError(event.error.stack || event.error.message || event.message);
-    } else {
-      showError(event.message);
-    }
-  });
-
-  window.addEventListener("unhandledrejection", function(event) {
+  window.onerror = function(message, source, line, column, error) {
     showError(
-      event.reason && event.reason.stack
-        ? event.reason.stack
-        : String(event.reason)
+      'JavaScript Error\\n' +
+      String(message || 'Unknown error') +
+      (line ? '\\nLine: ' + line : '')
+    );
+    return true;
+  };
+
+  window.addEventListener('unhandledrejection', function(event) {
+    showError(
+      'Promise Error\\n' +
+      String(event.reason || 'Unknown promise error')
     );
   });
 
   const originalConsoleError = console.error;
 
   console.error = function() {
-    const message = Array.from(arguments)
-      .map(value => {
-        try {
-          return typeof value === "string"
-            ? value
-            : JSON.stringify(value);
-        } catch (_) {
-          return String(value);
-        }
-      })
-      .join(" ");
+    try {
+      showError(
+        'Console Error\\n' +
+        Array.from(arguments).map(String).join(' ')
+      );
+    } catch (_) {}
 
-    showError(message);
     originalConsoleError.apply(console, arguments);
   };
 
   try {
-    const userCode = $safeJs;
-    const runUserCode = new Function(userCode);
-    runUserCode();
+    new Function($safeJs)();
   } catch (error) {
-    showError(error && error.stack ? error.stack : error);
+    showError(
+      'JavaScript Error\\n' +
+      String(error && error.message ? error.message : error)
+    );
   }
 })();
 </script>
@@ -247,97 +199,117 @@ $html
 </body>
 </html>
 ''';
+  }
 
-    await webController.loadHtmlString(document);
+  Future<void> loadPreview() async {
+    if (!mounted) return;
+
+    await webViewController.loadHtmlString(
+      buildPreviewDocument(),
+    );
+  }
+
+  void showPreviewError(String message) {
+    if (!mounted) return;
+
+    webViewController.runJavaScript('''
+      (function() {
+        var box = document.getElementById("wgs-error");
+        if (!box) return;
+        box.textContent = ${jsonEncode(message)};
+        box.style.display = "block";
+      })();
+    ''');
   }
 
   Future<void> saveProject() async {
     final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList('projects') ?? [];
 
-    final updated = Project(
+    final projects = prefs.getStringList('projects') ?? [];
+
+    final updatedProject = Project(
       name: widget.project.name,
       html: htmlController.text,
       css: cssController.text,
       js: jsController.text,
     );
 
-    for (int i = 0; i < list.length; i++) {
-      final data = jsonDecode(list[i]);
-      final project = Project.fromJson(
-        Map<String, dynamic>.from(data),
-      );
+    final encoded = jsonEncode(updatedProject.toJson());
 
-      if (project.name == widget.project.name) {
-        list[i] = jsonEncode(updated.toJson());
-        await prefs.setStringList('projects', list);
-        widget.onSaved();
+    final index = projects.indexWhere((item) {
+      try {
+        final decoded = jsonDecode(item);
 
-        if (!mounted) return;
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Project saved ✓'),
-            duration: Duration(milliseconds: 900),
-          ),
-        );
-        return;
+        return decoded is Map &&
+            decoded['name'] == updatedProject.name;
+      } catch (_) {
+        return false;
       }
+    });
+
+    if (index >= 0) {
+      projects[index] = encoded;
+    } else {
+      projects.add(encoded);
     }
 
-    list.add(jsonEncode(updated.toJson()));
-    await prefs.setStringList('projects', list);
-    widget.onSaved();
+    await prefs.setStringList('projects', projects);
 
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Project saved ✓'),
-        duration: Duration(milliseconds: 900),
+        content: Text('تم حفظ المشروع ✓'),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
 
-  void openPreview() {
+  Future<void> openPreview() async {
     setState(() {
       previewMode = true;
     });
 
-    loadPreview();
+    await loadPreview();
   }
 
   void closePreview() {
+    previewTimer?.cancel();
+
     setState(() {
       previewMode = false;
     });
   }
 
-  Widget buildEditor() {
-    final controller = selectedTab == 0
-        ? htmlController
-        : selectedTab == 1
-            ? cssController
-            : jsController;
+  Widget buildCodeEditor() {
+    late CodeController controller;
 
-    return CodeTheme(
-      data: CodeThemeData(
-        styles: monokaiSublimeTheme,
-      ),
-      child: CodeField(
-        controller: controller,
-        background: const Color(0xFF0B0E14),
-        cursorColor: const Color(0xFF9B83FF),
-        textStyle: const TextStyle(
-          fontFamily: 'monospace',
-          fontSize: 14,
-          height: 1.5,
+    if (selectedTab == 0) {
+      controller = htmlController;
+    } else if (selectedTab == 1) {
+      controller = cssController;
+    } else {
+      controller = jsController;
+    }
+
+    return Expanded(
+      child: CodeTheme(
+        data: CodeThemeData(
+          styles: monokaiSublimeTheme,
         ),
-        lineNumbers: true,
-        wrap: false,
-        expands: true,
-        padding: const EdgeInsets.all(14),
-        decoration: const BoxDecoration(),
+        child: CodeField(
+          controller: controller,
+          expands: true,
+          textStyle: const TextStyle(
+            fontFamily: 'monospace',
+            fontSize: 14,
+            height: 1.5,
+          ),
+          background: const Color(0xFF15171C),
+          padding: const EdgeInsets.all(16),
+          cursorColor: Colors.white,
+          keyboardType: TextInputType.multiline,
+        ),
       ),
     );
   }
@@ -346,37 +318,28 @@ $html
     return Stack(
       children: [
         Positioned.fill(
-          child: Container(
-            color: Colors.white,
-            child: WebViewWidget(
-              controller: webController,
-            ),
+          child: WebViewWidget(
+            controller: webViewController,
           ),
         ),
         Positioned(
-          top: 14,
-          right: 14,
+          top: 12,
+          right: 12,
           child: SafeArea(
             child: Material(
               color: Colors.transparent,
               child: InkWell(
-                borderRadius: BorderRadius.circular(14),
                 onTap: closePreview,
+                borderRadius: BorderRadius.circular(14),
                 child: Container(
-                  width: 44,
-                  height: 44,
+                  width: 42,
+                  height: 42,
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(.72),
+                    color: Colors.black.withValues(alpha: 0.65),
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                      color: Colors.white.withOpacity(.14),
+                      color: Colors.white.withValues(alpha: 0.12),
                     ),
-                    boxShadow: const [
-                      BoxShadow(
-                        blurRadius: 18,
-                        color: Colors.black38,
-                      ),
-                    ],
                   ),
                   child: const Icon(
                     Icons.close_rounded,
@@ -402,57 +365,54 @@ $html
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFF080A0F),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0D1017),
         title: Text(
           widget.project.name,
           style: const TextStyle(
-            fontSize: 17,
             fontWeight: FontWeight.w700,
           ),
         ),
         actions: [
           IconButton(
             onPressed: openPreview,
-            tooltip: 'Preview',
             icon: const Icon(Icons.play_arrow_rounded),
           ),
           IconButton(
             onPressed: saveProject,
-            tooltip: 'Save',
-            icon: const Icon(Icons.save_outlined),
+            icon: const Icon(Icons.save_rounded),
           ),
         ],
       ),
       body: Column(
         children: [
           Container(
-            height: 50,
-            color: const Color(0xFF0D1017),
+            margin: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(14),
+            ),
             child: Row(
               children: [
-                tabButton('HTML', 0),
-                tabButton('CSS', 1),
-                tabButton('JS', 2),
+                buildTab('HTML', 0),
+                buildTab('CSS', 1),
+                buildTab('JS', 2),
               ],
             ),
           ),
-          Expanded(
-            child: buildEditor(),
-          ),
+          buildCodeEditor(),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: FloatingActionButton.extended(
         onPressed: openPreview,
-        backgroundColor: const Color(0xFF7C5CFF),
-        child: const Icon(Icons.play_arrow_rounded),
+        icon: const Icon(Icons.play_arrow_rounded),
+        label: const Text('Preview'),
       ),
     );
   }
 
-  Widget tabButton(String title, int index) {
-    final active = selectedTab == index;
+  Widget buildTab(String title, int index) {
+    final selected = selectedTab == index;
 
     return Expanded(
       child: GestureDetector(
@@ -461,29 +421,39 @@ $html
             selectedTab = index;
           });
         },
-        child: Container(
-          alignment: Alignment.center,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(vertical: 11),
           decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(
-                color: active
-                    ? const Color(0xFF9B83FF)
-                    : Colors.transparent,
-                width: 2,
-              ),
-            ),
+            color: selected
+                ? Theme.of(context).colorScheme.primary
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
           ),
-          child: Text(
-            title,
-            style: TextStyle(
-              color: active ? Colors.white : Colors.white54,
-              fontWeight: active
-                  ? FontWeight.bold
-                  : FontWeight.normal,
+          child: Center(
+            child: Text(
+              title,
+              style: TextStyle(
+                color: selected
+                    ? Colors.white
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    previewTimer?.cancel();
+
+    htmlController.dispose();
+    cssController.dispose();
+    jsController.dispose();
+
+    super.dispose();
   }
 }
