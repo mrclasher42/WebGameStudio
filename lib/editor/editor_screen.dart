@@ -39,8 +39,10 @@ class _EditorScreenState extends State<EditorScreen> {
   bool previewMode = false;
   bool singleFileMode = false;
   bool settingsLoaded = false;
+  bool isSaving = false;
 
   Timer? previewTimer;
+  Timer? autoSaveTimer;
 
   @override
   void initState() {
@@ -68,7 +70,6 @@ class _EditorScreenState extends State<EditorScreen> {
 
   Future<void> loadEditorMode() async {
     final prefs = await SharedPreferences.getInstance();
-
     final enabled = prefs.getBool('singleFileMode') ?? false;
 
     if (!mounted) return;
@@ -88,6 +89,9 @@ ${widget.project.js}
         text: combined,
         language: xml.xml,
       );
+
+      singleController!.addListener(scheduleAutoSave);
+      singleController!.addListener(schedulePreview);
     } else {
       htmlController = CodeController(
         text: widget.project.html,
@@ -104,6 +108,10 @@ ${widget.project.js}
         language: javascript.javascript,
       );
 
+      htmlController!.addListener(scheduleAutoSave);
+      cssController!.addListener(scheduleAutoSave);
+      jsController!.addListener(scheduleAutoSave);
+
       htmlController!.addListener(schedulePreview);
       cssController!.addListener(schedulePreview);
       jsController!.addListener(schedulePreview);
@@ -113,10 +121,15 @@ ${widget.project.js}
       singleFileMode = enabled;
       settingsLoaded = true;
     });
+  }
 
-    if (enabled) {
-      singleController!.addListener(schedulePreview);
-    }
+  void scheduleAutoSave() {
+    autoSaveTimer?.cancel();
+
+    autoSaveTimer = Timer(
+      const Duration(milliseconds: 700),
+      saveProject,
+    );
   }
 
   void schedulePreview() {
@@ -233,7 +246,7 @@ $html
       'Promise Error\\n' +
       String(event.reason || 'Unknown promise error')
     );
-  });
+  };
 
   const originalConsoleError = console.error;
 
@@ -385,64 +398,53 @@ $html
   }
 
   Future<void> saveProject() async {
-    final prefs = await SharedPreferences.getInstance();
-    final projects = prefs.getStringList('projects') ?? [];
+    if (isSaving) return;
 
-    String html;
-    String cssCode;
-    String jsCode;
+    isSaving = true;
 
-    if (singleFileMode) {
-      html = singleController?.text ?? '';
-      cssCode = '';
-      jsCode = '';
-    } else {
-      html = htmlController?.text ?? '';
-      cssCode = cssController?.text ?? '';
-      jsCode = jsController?.text ?? '';
-    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final projects = prefs.getStringList('projects') ?? [];
 
-    final updatedProject = Project(
-      name: widget.project.name,
-      html: html,
-      css: cssCode,
-      js: jsCode,
-    );
+      final updatedProject = Project(
+        name: widget.project.name,
+        html: getCurrentHtml(),
+        css: getCurrentCss(),
+        js: getCurrentJs(),
+      );
 
-    final encoded = jsonEncode(updatedProject.toJson());
+      final encoded = jsonEncode(updatedProject.toJson());
 
-    final index = projects.indexWhere((item) {
-      try {
-        final decoded = jsonDecode(item);
+      final index = projects.indexWhere((item) {
+        try {
+          final decoded = jsonDecode(item);
 
-        return decoded is Map &&
-            decoded['name'] == updatedProject.name;
-      } catch (_) {
-        return false;
+          return decoded is Map &&
+              decoded['name'] == updatedProject.name;
+        } catch (_) {
+          return false;
+        }
+      });
+
+      if (index >= 0) {
+        projects[index] = encoded;
+      } else {
+        projects.add(encoded);
       }
-    });
 
-    if (index >= 0) {
-      projects[index] = encoded;
-    } else {
-      projects.add(encoded);
+      await prefs.setStringList('projects', projects);
+
+      widget.onSaved?.call();
+    } finally {
+      isSaving = false;
     }
-
-    await prefs.setStringList('projects', projects);
-
-    widget.onSaved?.call();
-
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('تم حفظ المشروع ✓'),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
   }
 
   Future<void> openPreview() async {
+    await saveProject();
+
+    if (!mounted) return;
+
     setState(() {
       previewMode = true;
     });
@@ -461,10 +463,7 @@ $html
   Widget buildCodeEditor() {
     if (singleFileMode) {
       return Expanded(
-        child: buildCodeField(
-          singleController!,
-          xml.xml,
-        ),
+        child: buildCodeField(singleController!),
       );
     }
 
@@ -479,21 +478,11 @@ $html
     }
 
     return Expanded(
-      child: buildCodeField(
-        controller,
-        selectedTab == 0
-            ? xml.xml
-            : selectedTab == 1
-                ? css.css
-                : javascript.javascript,
-      ),
+      child: buildCodeField(controller),
     );
   }
 
-  Widget buildCodeField(
-    CodeController controller,
-    dynamic language,
-  ) {
+  Widget buildCodeField(CodeController controller) {
     final dark = Theme.of(context).brightness == Brightness.dark;
 
     return CodeTheme(
@@ -601,6 +590,7 @@ $html
         },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
           padding: const EdgeInsets.symmetric(vertical: 11),
           decoration: BoxDecoration(
             color: selected
@@ -698,10 +688,6 @@ $html
             onPressed: openPreview,
             icon: const Icon(Icons.play_arrow_rounded),
           ),
-          IconButton(
-            onPressed: saveProject,
-            icon: const Icon(Icons.save_rounded),
-          ),
         ],
       ),
       body: Column(
@@ -721,6 +707,7 @@ $html
   @override
   void dispose() {
     previewTimer?.cancel();
+    autoSaveTimer?.cancel();
 
     htmlController?.dispose();
     cssController?.dispose();

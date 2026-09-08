@@ -43,7 +43,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
 
     slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.06),
+      begin: const Offset(0, 0.04),
       end: Offset.zero,
     ).animate(
       CurvedAnimation(
@@ -156,11 +156,33 @@ class _HomeScreenState extends State<HomeScreen>
 
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => EditorScreen(
+      PageRouteBuilder(
+        transitionDuration: const Duration(milliseconds: 280),
+        reverseTransitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (_, animation, __) => EditorScreen(
           project: project,
           onSaved: loadProjects,
         ),
+        transitionsBuilder: (_, animation, __, child) {
+          return FadeTransition(
+            opacity: CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+            ),
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, 0.025),
+                end: Offset.zero,
+              ).animate(
+                CurvedAnimation(
+                  parent: animation,
+                  curve: Curves.easeOutCubic,
+                ),
+              ),
+              child: child,
+            ),
+          );
+        },
       ),
     );
   }
@@ -168,57 +190,254 @@ class _HomeScreenState extends State<HomeScreen>
   void openProject(Project project) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => EditorScreen(
+      PageRouteBuilder(
+        transitionDuration: const Duration(milliseconds: 280),
+        reverseTransitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (_, animation, __) => EditorScreen(
           project: project,
           onSaved: loadProjects,
         ),
+        transitionsBuilder: (_, animation, __, child) {
+          return FadeTransition(
+            opacity: CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+            ),
+            child: child,
+          );
+        },
       ),
     );
   }
 
+  Future<void> renameProject(int index) async {
+    final project = projects[index];
+    final controller = TextEditingController(text: project.name);
+
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Rename Project'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              hintText: 'Project name',
+            ),
+            onSubmitted: (value) {
+              final name = value.trim();
+
+              if (name.isNotEmpty) {
+                Navigator.pop(context, name);
+              }
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final name = controller.text.trim();
+
+                if (name.isNotEmpty) {
+                  Navigator.pop(context, name);
+                }
+              },
+              child: const Text('Rename'),
+            ),
+          ],
+        );
+      },
+    );
+
+    controller.dispose();
+
+    if (name == null || name.trim().isEmpty) return;
+
+    final newName = name.trim();
+
+    if (newName == project.name) return;
+
+    final duplicate = projects.any(
+      (item) => item.name.toLowerCase() == newName.toLowerCase(),
+    );
+
+    if (duplicate) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('يوجد مشروع بهذا الاسم بالفعل'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      return;
+    }
+
+    setState(() {
+      projects[index] = Project(
+        name: newName,
+        html: project.html,
+        css: project.css,
+        js: project.js,
+      );
+    });
+
+    await saveProjects();
+  }
+
   Future<void> deleteProject(int index) async {
-    projects.removeAt(index);
+    final project = projects[index];
+
+    final firstConfirm = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          icon: const Icon(
+            Icons.delete_outline_rounded,
+            size: 34,
+          ),
+          title: const Text('Delete Project?'),
+          content: Text(
+            'Are you sure you want to delete "${project.name}"?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.red,
+              ),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (firstConfirm != true || !mounted) return;
+
+    final secondConfirm = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          icon: const Icon(
+            Icons.warning_amber_rounded,
+            size: 38,
+            color: Colors.red,
+          ),
+          title: const Text('Final Confirmation'),
+          content: const Text(
+            'This action cannot be undone.\n\nDo you really want to permanently delete this project?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Keep Project'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.red,
+              ),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete Permanently'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (secondConfirm != true || !mounted) return;
+
+    setState(() {
+      projects.removeAt(index);
+    });
+
     await saveProjects();
 
     if (!mounted) return;
 
-    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('تم حذف المشروع'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
-  Future<void> openSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    final initialSingleFile = prefs.getBool('singleFileMode') ?? false;
-
-    if (!mounted) return;
-
+  void openSettings() {
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      builder: (sheetContext) {
-        bool singleFileMode = initialSingleFile;
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Settings',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                ListTile(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  leading: Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .primary
+                          .withOpacity(.12),
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: Icon(
+                      widget.darkMode
+                          ? Icons.dark_mode_rounded
+                          : Icons.light_mode_rounded,
+                    ),
+                  ),
+                  title: Text(
+                    widget.darkMode ? 'Dark Theme' : 'Light Theme',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  subtitle: const Text('Choose app appearance'),
+                  trailing: Switch(
+                    value: widget.darkMode,
+                    onChanged: (value) {
+                      widget.onThemeChanged(value);
+                      Navigator.pop(context);
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+                FutureBuilder<SharedPreferences>(
+                  future: SharedPreferences.getInstance(),
+                  builder: (context, snapshot) {
+                    final enabled =
+                        snapshot.data?.getBool('singleFileMode') ?? false;
 
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Settings',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    ListTile(
+                    return ListTile(
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
                       ),
@@ -232,43 +451,9 @@ class _HomeScreenState extends State<HomeScreen>
                               .withOpacity(.12),
                           borderRadius: BorderRadius.circular(13),
                         ),
-                        child: Icon(
-                          widget.darkMode
-                              ? Icons.dark_mode_rounded
-                              : Icons.light_mode_rounded,
+                        child: const Icon(
+                          Icons.description_rounded,
                         ),
-                      ),
-                      title: Text(
-                        widget.darkMode ? 'Dark Theme' : 'Light Theme',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      subtitle: const Text('Choose app appearance'),
-                      trailing: Switch(
-                        value: widget.darkMode,
-                        onChanged: (value) {
-                          widget.onThemeChanged(value);
-                          Navigator.pop(sheetContext);
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    ListTile(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      leading: Container(
-                        width: 42,
-                        height: 42,
-                        decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .primary
-                              .withOpacity(.12),
-                          borderRadius: BorderRadius.circular(13),
-                        ),
-                        child: const Icon(Icons.description_rounded),
                       ),
                       title: const Text(
                         'Single File Mode',
@@ -277,27 +462,30 @@ class _HomeScreenState extends State<HomeScreen>
                         ),
                       ),
                       subtitle: const Text(
-                        'Edit HTML, CSS and JavaScript in one file',
+                        'HTML, CSS and JS in one file',
                       ),
                       trailing: Switch(
-                        value: singleFileMode,
+                        value: enabled,
                         onChanged: (value) async {
-                          setSheetState(() {
-                            singleFileMode = value;
-                          });
+                          final prefs =
+                              await SharedPreferences.getInstance();
 
                           await prefs.setBool(
                             'singleFileMode',
                             value,
                           );
+
+                          if (context.mounted) {
+                            Navigator.pop(context);
+                          }
                         },
                       ),
-                    ),
-                  ],
+                    );
+                  },
                 ),
-              ),
-            );
-          },
+              ],
+            ),
+          ),
         );
       },
     );
@@ -322,7 +510,8 @@ class _HomeScreenState extends State<HomeScreen>
                     children: [
                       Expanded(
                         child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
                           children: [
                             Text(
                               'Web Game Studio',
@@ -350,7 +539,9 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                       IconButton(
                         onPressed: openSettings,
-                        icon: const Icon(Icons.settings_rounded),
+                        icon: const Icon(
+                          Icons.settings_rounded,
+                        ),
                       ),
                     ],
                   ),
@@ -373,7 +564,9 @@ class _HomeScreenState extends State<HomeScreen>
                         '${projects.length}',
                         style: TextStyle(
                           fontWeight: FontWeight.w700,
-                          color: Theme.of(context).colorScheme.primary,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .primary,
                         ),
                       ),
                     ],
@@ -382,66 +575,77 @@ class _HomeScreenState extends State<HomeScreen>
                   Expanded(
                     child: projects.isEmpty
                         ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.code_rounded,
-                                  size: 52,
-                                  color: isDark
-                                      ? Colors.white24
-                                      : Colors.black26,
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'No projects yet',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w700,
+                            child: AnimatedSwitcher(
+                              duration:
+                                  const Duration(milliseconds: 280),
+                              child: Column(
+                                key: const ValueKey('empty'),
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.code_rounded,
+                                    size: 52,
                                     color: isDark
-                                        ? Colors.white60
-                                        : Colors.black54,
+                                        ? Colors.white24
+                                        : Colors.black26,
                                   ),
-                                ),
-                                const SizedBox(height: 5),
-                                Text(
-                                  'Create your first project',
-                                  style: TextStyle(
-                                    color: isDark
-                                        ? Colors.white38
-                                        : Colors.black38,
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'No projects yet',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      color: isDark
+                                          ? Colors.white60
+                                          : Colors.black54,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                  const SizedBox(height: 5),
+                                  Text(
+                                    'Create your first project',
+                                    style: TextStyle(
+                                      color: isDark
+                                          ? Colors.white38
+                                          : Colors.black38,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           )
                         : ListView.separated(
+                            physics: const BouncingScrollPhysics(),
                             itemCount: projects.length,
                             separatorBuilder: (_, __) =>
                                 const SizedBox(height: 10),
                             itemBuilder: (context, index) {
                               final project = projects[index];
 
-                              return Dismissible(
+                              return TweenAnimationBuilder<double>(
                                 key: ValueKey(
                                   '${project.name}_$index',
                                 ),
-                                direction: DismissDirection.endToStart,
-                                onDismissed: (_) => deleteProject(index),
-                                background: Container(
-                                  alignment: Alignment.centerRight,
-                                  padding:
-                                      const EdgeInsets.only(right: 20),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red.withOpacity(.12),
-                                    borderRadius:
-                                        BorderRadius.circular(18),
-                                  ),
-                                  child: const Icon(
-                                    Icons.delete_outline_rounded,
-                                    color: Colors.red,
-                                  ),
+                                tween: Tween(
+                                  begin: 0,
+                                  end: 1,
                                 ),
+                                duration: Duration(
+                                  milliseconds: 280 + (index * 45),
+                                ),
+                                curve: Curves.easeOutCubic,
+                                builder:
+                                    (context, value, child) {
+                                  return Opacity(
+                                    opacity: value,
+                                    child: Transform.translate(
+                                      offset: Offset(
+                                        0,
+                                        12 * (1 - value),
+                                      ),
+                                      child: child,
+                                    ),
+                                  );
+                                },
                                 child: Card(
                                   elevation: 0,
                                   margin: EdgeInsets.zero,
@@ -478,10 +682,51 @@ class _HomeScreenState extends State<HomeScreen>
                                     subtitle: const Text(
                                       'HTML • CSS • JavaScript',
                                     ),
-                                    trailing: const Icon(
-                                      Icons.chevron_right_rounded,
+                                    trailing: PopupMenuButton<String>(
+                                      tooltip: 'Project options',
+                                      onSelected: (value) {
+                                        if (value == 'rename') {
+                                          renameProject(index);
+                                        } else if (value == 'delete') {
+                                          deleteProject(index);
+                                        }
+                                      },
+                                      itemBuilder: (context) => [
+                                        const PopupMenuItem(
+                                          value: 'rename',
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                Icons.edit_rounded,
+                                              ),
+                                              SizedBox(width: 12),
+                                              Text('Rename'),
+                                            ],
+                                          ),
+                                        ),
+                                        const PopupMenuItem(
+                                          value: 'delete',
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                Icons
+                                                    .delete_outline_rounded,
+                                                color: Colors.red,
+                                              ),
+                                              SizedBox(width: 12),
+                                              Text(
+                                                'Delete',
+                                                style: TextStyle(
+                                                  color: Colors.red,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                    onTap: () => openProject(project),
+                                    onTap: () =>
+                                        openProject(project),
                                   ),
                                 ),
                               );
