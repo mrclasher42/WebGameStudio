@@ -51,7 +51,7 @@ jobs:
       - name: Get Flutter dependencies
         run: flutter pub get
 
-      - name: Prepare Python runtime
+      - name: Prepare Python environment
         run: |
           echo "SERIOUS_PYTHON_VERSION=3.12" >> "$GITHUB_ENV"
           echo "SERIOUS_PYTHON_SITE_PACKAGES=$GITHUB_WORKSPACE/build/site-packages" >> "$GITHUB_ENV"
@@ -60,14 +60,13 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/build/site-packages"
           mkdir -p "$GITHUB_WORKSPACE/build/python-app"
 
+      - name: Package Python app
+        run: |
           dart run serious_python:main package python/server -p Android
 
-      - name: Verify Python runtime
+      - name: Inspect Python package
         run: |
-          test -f build/python-app/server.py
-          test -d build/site-packages
-          ls -la build/python-app
-          ls -la build/site-packages
+          find build -maxdepth 5 -type f | sort | head -200
 
       - name: Build release APK
         run: flutter build apk --release
