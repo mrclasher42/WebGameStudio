@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import '../models/game_object.dart';
 import '../models/game_project.dart';
+import '../models/game_type.dart';
 import '../runtime/game_runtime.dart';
 import '../services/project_storage.dart';
 import '../screens/settings_screen.dart';
+import 'editor_tools.dart';
+import 'project_type_screen.dart';
 
 class EditorScreen extends StatefulWidget {
   final bool arabic;
@@ -36,11 +39,13 @@ class _EditorScreenState extends State<EditorScreen> {
 
   GameObject? get selected {
     for (final object in project.objects) {
-      if (object.id == selectedId) {
-        return object;
-      }
+      if (object.id == selectedId) return object;
     }
     return null;
+  }
+
+  List<EditorTool> get tools {
+    return EditorTools.forType(project.gameType);
   }
 
   void selectObject(String id) {
@@ -56,14 +61,25 @@ class _EditorScreenState extends State<EditorScreen> {
     });
   }
 
-  void addObject(String type) {
+  void createProject(GameType type) {
+    setState(() {
+      project = GameProject(
+        name: 'My Game',
+        gameType: type,
+      );
+      selectedId = null;
+      propertiesVisible = true;
+    });
+  }
+
+  void addTool(EditorTool tool) {
     final object = GameObject(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
-      type: type,
+      type: tool.id,
       x: 120 + project.objects.length * 20,
       y: 150,
-      width: type == 'Platform' ? 180 : 60,
-      height: type == 'Platform' ? 40 : 60,
+      width: tool.id == 'platform' ? 180 : 100,
+      height: tool.id == 'platform' ? 40 : 70,
     );
 
     setState(() {
@@ -103,21 +119,39 @@ class _EditorScreenState extends State<EditorScreen> {
     if (selectedId == null) return;
 
     setState(() {
-      project.objects.removeWhere((o) => o.id == selectedId);
+      project.objects.removeWhere(
+        (o) => o.id == selectedId,
+      );
       selectedId = null;
     });
   }
 
   Color objectColor(String type) {
     switch (type) {
-      case 'Player':
+      case 'player':
         return Colors.lightBlue;
-      case 'Platform':
+      case 'platform':
         return Colors.brown;
-      case 'Coin':
+      case 'coin':
         return Colors.amber;
-      case 'Enemy':
+      case 'enemy':
         return Colors.red;
+      case 'cell':
+        return Colors.blueGrey;
+      case 'button':
+        return Colors.blue;
+      case 'text':
+        return Colors.deepPurple;
+      case 'image':
+        return Colors.green;
+      case 'card':
+        return Colors.orange;
+      case 'progress':
+        return Colors.teal;
+      case 'timer':
+        return Colors.indigo;
+      case 'input':
+        return Colors.cyan;
       default:
         return Colors.grey;
     }
@@ -145,67 +179,68 @@ class _EditorScreenState extends State<EditorScreen> {
                 ),
                 painter: GridPainter(),
               ),
-              ...project.objects.map((object) {
-                final isSelected = object.id == selectedId;
+              ...project.objects.map(
+                (object) {
+                  final isSelected =
+                      object.id == selectedId;
 
-                return Positioned(
-                  left: object.x,
-                  top: object.y,
-                  child: GestureDetector(
-                    onTap: () {
-                      selectObject(object.id);
-                    },
-                    onPanStart: (_) {
-                      selectObject(object.id);
-                    },
-                    onPanUpdate: (details) {
-                      setState(() {
-                        object.x += details.delta.dx;
-                        object.y += details.delta.dy;
-                      });
-                    },
-                    child: Transform.rotate(
-                      angle: object.rotation * 3.1415926535 / 180,
-                      child: Container(
-                        width: object.width,
-                        height: object.height,
-                        decoration: BoxDecoration(
-                          color: objectColor(object.type),
-                          borderRadius: BorderRadius.circular(10),
-                          border: isSelected
-                              ? Border.all(
-                                  width: 3,
-                                  color: Colors.white,
-                                )
-                              : null,
-                          boxShadow: isSelected
-                              ? const [
-                                  BoxShadow(
-                                    blurRadius: 14,
-                                    spreadRadius: 2,
-                                    color: Colors.white30,
-                                  ),
-                                ]
-                              : null,
-                        ),
-                        alignment: Alignment.center,
-                        child: FittedBox(
-                          child: Padding(
-                            padding: const EdgeInsets.all(6),
-                            child: Text(
+                  return Positioned(
+                    left: object.x,
+                    top: object.y,
+                    child: GestureDetector(
+                      onTap: () {
+                        selectObject(object.id);
+                      },
+                      onPanStart: (_) {
+                        selectObject(object.id);
+                      },
+                      onPanUpdate: (details) {
+                        setState(() {
+                          object.x += details.delta.dx;
+                          object.y += details.delta.dy;
+                        });
+                      },
+                      child: Transform.rotate(
+                        angle: object.rotation *
+                            3.1415926535 /
+                            180,
+                        child: Container(
+                          width: object.width,
+                          height: object.height,
+                          decoration: BoxDecoration(
+                            color: objectColor(
                               object.type,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
+                            ),
+                            borderRadius:
+                                BorderRadius.circular(10),
+                            border: isSelected
+                                ? Border.all(
+                                    width: 3,
+                                    color: Colors.white,
+                                  )
+                                : null,
+                          ),
+                          alignment: Alignment.center,
+                          child: FittedBox(
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.all(6),
+                              child: Text(
+                                object.type,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight:
+                                      FontWeight.bold,
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                );
-              }),
+                  );
+                },
+              ),
             ],
           ),
         ),
@@ -226,19 +261,19 @@ class _EditorScreenState extends State<EditorScreen> {
         constraints: const BoxConstraints(
           maxHeight: 330,
         ),
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+        padding: const EdgeInsets.fromLTRB(
+          14,
+          8,
+          14,
+          10,
+        ),
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
+          color: Theme.of(context)
+              .colorScheme
+              .surface,
           borderRadius: const BorderRadius.vertical(
             top: Radius.circular(22),
           ),
-          boxShadow: const [
-            BoxShadow(
-              blurRadius: 18,
-              offset: Offset(0, -4),
-              color: Colors.black38,
-            ),
-          ],
         ),
         child: SingleChildScrollView(
           child: Column(
@@ -246,44 +281,32 @@ class _EditorScreenState extends State<EditorScreen> {
               Row(
                 children: [
                   Expanded(
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.tune,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .primary,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          object.type,
-                          style: const TextStyle(
-                            fontSize: 19,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
+                    child: Text(
+                      object.type,
+                      style: const TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                   IconButton(
-                    tooltip: widget.arabic
-                        ? 'إخفاء القائمة'
-                        : 'Hide panel',
                     onPressed: () {
                       setState(() {
                         propertiesVisible = false;
                       });
                     },
-                    icon: const Icon(Icons.keyboard_arrow_down),
+                    icon: const Icon(
+                      Icons.keyboard_arrow_down,
+                    ),
                   ),
                   IconButton(
-                    tooltip: widget.arabic ? 'حذف' : 'Delete',
                     onPressed: deleteSelected,
-                    icon: const Icon(Icons.delete_outline),
+                    icon: const Icon(
+                      Icons.delete_outline,
+                    ),
                   ),
                 ],
               ),
-              const Divider(height: 8),
               _slider(
                 label: 'X',
                 value: object.x.clamp(
@@ -313,8 +336,11 @@ class _EditorScreenState extends State<EditorScreen> {
                 },
               ),
               _slider(
-                label: widget.arabic ? 'العرض' : 'Width',
-                value: object.width.clamp(20, 500),
+                label: 'Width',
+                value: object.width.clamp(
+                  20,
+                  500,
+                ),
                 min: 20,
                 max: 500,
                 onChanged: (value) {
@@ -324,8 +350,11 @@ class _EditorScreenState extends State<EditorScreen> {
                 },
               ),
               _slider(
-                label: widget.arabic ? 'الارتفاع' : 'Height',
-                value: object.height.clamp(20, 500),
+                label: 'Height',
+                value: object.height.clamp(
+                  20,
+                  500,
+                ),
                 min: 20,
                 max: 500,
                 onChanged: (value) {
@@ -335,7 +364,7 @@ class _EditorScreenState extends State<EditorScreen> {
                 },
               ),
               _slider(
-                label: widget.arabic ? 'الدوران' : 'Rotation',
+                label: 'Rotation',
                 value: object.rotation,
                 min: -180,
                 max: 180,
@@ -362,11 +391,11 @@ class _EditorScreenState extends State<EditorScreen> {
     return Row(
       children: [
         SizedBox(
-          width: 65,
+          width: 75,
           child: Text(
             '$label ${value.toStringAsFixed(0)}',
             style: const TextStyle(
-              fontSize: 13,
+              fontSize: 12,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -388,32 +417,43 @@ class _EditorScreenState extends State<EditorScreen> {
       context: context,
       showDragHandle: true,
       builder: (context) {
-        final items = [
-          ['Player', Icons.person],
-          ['Platform', Icons.view_agenda],
-          ['Coin', Icons.monetization_on],
-          ['Enemy', Icons.smart_toy],
-          ['Box', Icons.inventory_2],
-        ];
-
         return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Wrap(
-              children: items.map((item) {
-                return ListTile(
-                  leading: Icon(item[1] as IconData),
-                  title: Text(item[0] as String),
-                  onTap: () {
-                    Navigator.pop(context);
-                    addObject(item[0] as String);
-                  },
-                );
-              }).toList(),
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.only(
+              bottom: 12,
             ),
+            children: tools.map((tool) {
+              return ListTile(
+                leading: const Icon(
+                  Icons.add_circle_outline,
+                ),
+                title: Text(
+                  widget.arabic
+                      ? tool.titleAr
+                      : tool.title,
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  addTool(tool);
+                },
+              );
+            }).toList(),
           ),
         );
       },
+    );
+  }
+
+  void openGameTypeMenu() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ProjectTypeScreen(
+          arabic: widget.arabic,
+          onSelected: createProject,
+        ),
+      ),
     );
   }
 
@@ -423,13 +463,14 @@ class _EditorScreenState extends State<EditorScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Web Game Studio'),
+        title: Text(
+          project.gameType == GameType.custom
+              ? 'Web Game Studio'
+              : '${project.gameType.titleEn} Editor',
+        ),
         actions: [
           if (hasSelection && !propertiesVisible)
             IconButton(
-              tooltip: widget.arabic
-                  ? 'إظهار الخصائص'
-                  : 'Show properties',
               onPressed: () {
                 setState(() {
                   propertiesVisible = true;
@@ -438,17 +479,27 @@ class _EditorScreenState extends State<EditorScreen> {
               icon: const Icon(Icons.tune),
             ),
           IconButton(
-            tooltip: widget.arabic ? 'فتح' : 'Open',
+            onPressed: openGameTypeMenu,
+            tooltip: widget.arabic
+                ? 'نوع اللعبة'
+                : 'Game type',
+            icon: const Icon(
+              Icons.category_outlined,
+            ),
+          ),
+          IconButton(
             onPressed: load,
-            icon: const Icon(Icons.folder_open),
+            icon: const Icon(
+              Icons.folder_open,
+            ),
           ),
           IconButton(
-            tooltip: widget.arabic ? 'حفظ' : 'Save',
             onPressed: save,
-            icon: const Icon(Icons.save_outlined),
+            icon: const Icon(
+              Icons.save_outlined,
+            ),
           ),
           IconButton(
-            tooltip: widget.arabic ? 'الإعدادات' : 'Settings',
             onPressed: () {
               Navigator.push(
                 context,
@@ -456,16 +507,19 @@ class _EditorScreenState extends State<EditorScreen> {
                   builder: (_) => SettingsScreen(
                     arabic: widget.arabic,
                     darkMode: widget.darkMode,
-                    onLanguageChanged: widget.onLanguageChanged,
-                    onThemeChanged: widget.onThemeChanged,
+                    onLanguageChanged:
+                        widget.onLanguageChanged,
+                    onThemeChanged:
+                        widget.onThemeChanged,
                   ),
                 ),
               );
             },
-            icon: const Icon(Icons.settings_outlined),
+            icon: const Icon(
+              Icons.settings_outlined,
+            ),
           ),
           IconButton(
-            tooltip: widget.arabic ? 'تشغيل' : 'Play',
             onPressed: () {
               Navigator.push(
                 context,
@@ -476,7 +530,9 @@ class _EditorScreenState extends State<EditorScreen> {
                 ),
               );
             },
-            icon: const Icon(Icons.play_arrow),
+            icon: const Icon(
+              Icons.play_arrow,
+            ),
           ),
         ],
       ),
@@ -485,7 +541,8 @@ class _EditorScreenState extends State<EditorScreen> {
           Positioned.fill(
             child: buildCanvas(),
           ),
-          if (selected != null && propertiesVisible)
+          if (selected != null &&
+              propertiesVisible)
             Positioned(
               left: 0,
               right: 0,
@@ -494,29 +551,17 @@ class _EditorScreenState extends State<EditorScreen> {
             ),
           Positioned(
             right: 16,
-            bottom: selected != null && propertiesVisible
-                ? 350
-                : 16,
+            bottom:
+                selected != null &&
+                        propertiesVisible
+                    ? 350
+                    : 16,
             child: FloatingActionButton(
               heroTag: 'add',
               onPressed: openAddMenu,
               child: const Icon(Icons.add),
             ),
           ),
-          if (selected != null && propertiesVisible)
-            Positioned(
-              right: 16,
-              bottom: 350 + 70,
-              child: FloatingActionButton.small(
-                heroTag: 'hide',
-                onPressed: () {
-                  setState(() {
-                    propertiesVisible = false;
-                  });
-                },
-                child: const Icon(Icons.keyboard_arrow_down),
-              ),
-            ),
         ],
       ),
     );
@@ -525,14 +570,22 @@ class _EditorScreenState extends State<EditorScreen> {
 
 class GridPainter extends CustomPainter {
   @override
-  void paint(Canvas canvas, Size size) {
+  void paint(
+    Canvas canvas,
+    Size size,
+  ) {
     final paint = Paint()
-      ..color = Colors.white.withOpacity(0.06)
+      ..color =
+          Colors.white.withOpacity(0.06)
       ..strokeWidth = 1;
 
     const grid = 40.0;
 
-    for (double x = 0; x <= size.width; x += grid) {
+    for (
+      double x = 0;
+      x <= size.width;
+      x += grid
+    ) {
       canvas.drawLine(
         Offset(x, 0),
         Offset(x, size.height),
@@ -540,7 +593,11 @@ class GridPainter extends CustomPainter {
       );
     }
 
-    for (double y = 0; y <= size.height; y += grid) {
+    for (
+      double y = 0;
+      y <= size.height;
+      y += grid
+    ) {
       canvas.drawLine(
         Offset(0, y),
         Offset(size.width, y),
@@ -550,7 +607,9 @@ class GridPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) {
+  bool shouldRepaint(
+    covariant CustomPainter oldDelegate,
+  ) {
     return false;
   }
 }
