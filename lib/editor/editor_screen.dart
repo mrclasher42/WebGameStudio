@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../models/game_object.dart';
 import '../models/game_project.dart';
 import '../models/game_type.dart';
@@ -44,9 +45,7 @@ class _EditorScreenState extends State<EditorScreen> {
     return null;
   }
 
-  List<EditorTool> get tools {
-    return EditorTools.forType(project.gameType);
-  }
+  List<EditorTool> get tools => EditorTools.forType(project.gameType);
 
   void selectObject(String id) {
     setState(() {
@@ -72,15 +71,49 @@ class _EditorScreenState extends State<EditorScreen> {
     });
   }
 
-  void addTool(EditorTool tool) {
-    final object = GameObject(
+  GameObject makeObject(EditorTool tool) {
+    final index = project.objects.length;
+
+    final data = <String, dynamic>{};
+
+    if (tool.id == 'text') {
+      data['text'] = 'New Text';
+    }
+
+    if (tool.id == 'button') {
+      data['text'] = 'Button';
+    }
+
+    if (tool.id == 'image') {
+      data['source'] = '';
+    }
+
+    if (tool.id == 'input') {
+      data['placeholder'] = 'Enter text';
+    }
+
+    if (tool.id == 'question') {
+      data['question'] = '';
+      data['answers'] = <String>['', '', '', ''];
+      data['correct'] = 0;
+      data['points'] = 1;
+      data['correctSound'] = true;
+      data['wrongSound'] = true;
+    }
+
+    return GameObject(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       type: tool.id,
-      x: 120 + project.objects.length * 20,
-      y: 150,
-      width: tool.id == 'platform' ? 180 : 100,
-      height: tool.id == 'platform' ? 40 : 70,
+      x: 120 + index * 20,
+      y: 120 + index * 20,
+      width: tool.id == 'platform' ? 180 : 180,
+      height: tool.id == 'text' ? 60 : 80,
+      data: data,
     );
+  }
+
+  void addTool(EditorTool tool) {
+    final object = makeObject(tool);
 
     setState(() {
       project.objects.add(object);
@@ -119,15 +152,22 @@ class _EditorScreenState extends State<EditorScreen> {
     if (selectedId == null) return;
 
     setState(() {
-      project.objects.removeWhere(
-        (o) => o.id == selectedId,
-      );
+      project.objects.removeWhere((o) => o.id == selectedId);
       selectedId = null;
     });
   }
 
-  Color objectColor(String type) {
-    switch (type) {
+  Color objectColor(GameObject object) {
+    final custom = object.data['color']?.toString();
+
+    if (custom != null) {
+      final value = int.tryParse(custom);
+      if (value != null) {
+        return Color(value);
+      }
+    }
+
+    switch (object.type) {
       case 'player':
         return Colors.lightBlue;
       case 'platform':
@@ -136,8 +176,6 @@ class _EditorScreenState extends State<EditorScreen> {
         return Colors.amber;
       case 'enemy':
         return Colors.red;
-      case 'cell':
-        return Colors.blueGrey;
       case 'button':
         return Colors.blue;
       case 'text':
@@ -146,15 +184,44 @@ class _EditorScreenState extends State<EditorScreen> {
         return Colors.green;
       case 'card':
         return Colors.orange;
+      case 'question':
+        return Colors.indigo;
       case 'progress':
         return Colors.teal;
       case 'timer':
-        return Colors.indigo;
+        return Colors.indigoAccent;
       case 'input':
         return Colors.cyan;
+      case 'panel':
+        return Colors.blueGrey;
       default:
         return Colors.grey;
     }
+  }
+
+  String objectLabel(GameObject object) {
+    if (object.type == 'text') {
+      return object.data['text']?.toString() ?? '';
+    }
+
+    if (object.type == 'button') {
+      return object.data['text']?.toString() ?? 'Button';
+    }
+
+    if (object.type == 'input') {
+      return object.data['placeholder']?.toString() ?? 'Input';
+    }
+
+    if (object.type == 'question') {
+      final question = object.data['question']?.toString() ?? '';
+      return question.isEmpty ? 'Quiz Question' : question;
+    }
+
+    if (object.type == 'image') {
+      return 'Image';
+    }
+
+    return object.type;
   }
 
   Widget buildCanvas() {
@@ -165,8 +232,6 @@ class _EditorScreenState extends State<EditorScreen> {
         minScale: 0.2,
         maxScale: 3,
         boundaryMargin: const EdgeInsets.all(600),
-        panEnabled: true,
-        scaleEnabled: true,
         child: SizedBox(
           width: project.worldWidth,
           height: project.worldHeight,
@@ -181,19 +246,14 @@ class _EditorScreenState extends State<EditorScreen> {
               ),
               ...project.objects.map(
                 (object) {
-                  final isSelected =
-                      object.id == selectedId;
+                  final isSelected = object.id == selectedId;
 
                   return Positioned(
                     left: object.x,
                     top: object.y,
                     child: GestureDetector(
-                      onTap: () {
-                        selectObject(object.id);
-                      },
-                      onPanStart: (_) {
-                        selectObject(object.id);
-                      },
+                      onTap: () => selectObject(object.id),
+                      onPanStart: (_) => selectObject(object.id),
                       onPanUpdate: (details) {
                         setState(() {
                           object.x += details.delta.dx;
@@ -201,18 +261,18 @@ class _EditorScreenState extends State<EditorScreen> {
                         });
                       },
                       child: Transform.rotate(
-                        angle: object.rotation *
-                            3.1415926535 /
-                            180,
+                        angle: object.rotation * 3.1415926535 / 180,
                         child: Container(
                           width: object.width,
                           height: object.height,
                           decoration: BoxDecoration(
-                            color: objectColor(
-                              object.type,
+                            color: objectColor(object),
+                            borderRadius: BorderRadius.circular(
+                              object.type == 'button' ||
+                                      object.type == 'question'
+                                  ? 14
+                                  : 8,
                             ),
-                            borderRadius:
-                                BorderRadius.circular(10),
                             border: isSelected
                                 ? Border.all(
                                     width: 3,
@@ -221,20 +281,26 @@ class _EditorScreenState extends State<EditorScreen> {
                                 : null,
                           ),
                           alignment: Alignment.center,
-                          child: FittedBox(
-                            child: Padding(
-                              padding:
-                                  const EdgeInsets.all(6),
-                              child: Text(
-                                object.type,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight:
-                                      FontWeight.bold,
+                          padding: const EdgeInsets.all(8),
+                          child: object.type == 'text'
+                              ? Text(
+                                  objectLabel(object),
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                )
+                              : FittedBox(
+                                  child: Text(
+                                    objectLabel(object),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                          ),
                         ),
                       ),
                     ),
@@ -248,6 +314,128 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
+  Widget textEditor(
+    GameObject object, {
+    required String keyName,
+    required String label,
+    int maxLines = 1,
+  }) {
+    final controller = TextEditingController(
+      text: object.data[keyName]?.toString() ?? '',
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextField(
+        controller: controller,
+        maxLines: maxLines,
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+        ),
+        onChanged: (value) {
+          object.data[keyName] = value;
+          setState(() {});
+        },
+      ),
+    );
+  }
+
+  Widget smartProperties(GameObject object) {
+    switch (object.type) {
+      case 'text':
+        return textEditor(
+          object,
+          keyName: 'text',
+          label: widget.arabic ? 'النص' : 'Text',
+          maxLines: 3,
+        );
+
+      case 'button':
+        return textEditor(
+          object,
+          keyName: 'text',
+          label: widget.arabic ? 'نص الزر' : 'Button text',
+        );
+
+      case 'input':
+        return textEditor(
+          object,
+          keyName: 'placeholder',
+          label: widget.arabic ? 'النص التوضيحي' : 'Placeholder',
+        );
+
+      case 'image':
+        return textEditor(
+          object,
+          keyName: 'source',
+          label: widget.arabic ? 'مصدر الصورة' : 'Image source',
+        );
+
+      case 'question':
+        return Column(
+          children: [
+            textEditor(
+              object,
+              keyName: 'question',
+              label: widget.arabic ? 'السؤال' : 'Question',
+              maxLines: 3,
+            ),
+            ...List.generate(4, (index) {
+              final answers =
+                  List<String>.from(object.data['answers'] ?? ['', '', '', '']);
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: TextField(
+                  controller: TextEditingController(
+                    text: answers[index],
+                  ),
+                  decoration: InputDecoration(
+                    labelText: widget.arabic
+                        ? 'الإجابة ${index + 1}'
+                        : 'Answer ${index + 1}',
+                    border: const OutlineInputBorder(),
+                  ),
+                  onChanged: (value) {
+                    answers[index] = value;
+                    object.data['answers'] = answers;
+                    setState(() {});
+                  },
+                ),
+              );
+            }),
+            DropdownButtonFormField<int>(
+              value: (object.data['correct'] as num?)?.toInt() ?? 0,
+              decoration: InputDecoration(
+                labelText:
+                    widget.arabic ? 'الإجابة الصحيحة' : 'Correct answer',
+                border: const OutlineInputBorder(),
+              ),
+              items: List.generate(
+                4,
+                (index) => DropdownMenuItem(
+                  value: index,
+                  child: Text(
+                    widget.arabic
+                        ? 'الإجابة ${index + 1}'
+                        : 'Answer ${index + 1}',
+                  ),
+                ),
+              ),
+              onChanged: (value) {
+                object.data['correct'] = value ?? 0;
+                setState(() {});
+              },
+            ),
+          ],
+        );
+
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
   Widget propertyPanel() {
     final object = selected;
 
@@ -258,19 +446,10 @@ class _EditorScreenState extends State<EditorScreen> {
     return SafeArea(
       top: false,
       child: Container(
-        constraints: const BoxConstraints(
-          maxHeight: 330,
-        ),
-        padding: const EdgeInsets.fromLTRB(
-          14,
-          8,
-          14,
-          10,
-        ),
+        constraints: const BoxConstraints(maxHeight: 470),
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
         decoration: BoxDecoration(
-          color: Theme.of(context)
-              .colorScheme
-              .surface,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: const BorderRadius.vertical(
             top: Radius.circular(22),
           ),
@@ -295,72 +474,49 @@ class _EditorScreenState extends State<EditorScreen> {
                         propertiesVisible = false;
                       });
                     },
-                    icon: const Icon(
-                      Icons.keyboard_arrow_down,
-                    ),
+                    icon: const Icon(Icons.keyboard_arrow_down),
                   ),
                   IconButton(
                     onPressed: deleteSelected,
-                    icon: const Icon(
-                      Icons.delete_outline,
-                    ),
+                    icon: const Icon(Icons.delete_outline),
                   ),
                 ],
               ),
+              smartProperties(object),
               _slider(
                 label: 'X',
-                value: object.x.clamp(
-                  0,
-                  project.worldWidth,
-                ),
+                value: object.x.clamp(0, project.worldWidth),
                 min: 0,
                 max: project.worldWidth,
                 onChanged: (value) {
-                  setState(() {
-                    object.x = value;
-                  });
+                  setState(() => object.x = value);
                 },
               ),
               _slider(
                 label: 'Y',
-                value: object.y.clamp(
-                  0,
-                  project.worldHeight,
-                ),
+                value: object.y.clamp(0, project.worldHeight),
                 min: 0,
                 max: project.worldHeight,
                 onChanged: (value) {
-                  setState(() {
-                    object.y = value;
-                  });
+                  setState(() => object.y = value);
                 },
               ),
               _slider(
                 label: 'Width',
-                value: object.width.clamp(
-                  20,
-                  500,
-                ),
+                value: object.width.clamp(20, 500),
                 min: 20,
                 max: 500,
                 onChanged: (value) {
-                  setState(() {
-                    object.width = value;
-                  });
+                  setState(() => object.width = value);
                 },
               ),
               _slider(
                 label: 'Height',
-                value: object.height.clamp(
-                  20,
-                  500,
-                ),
+                value: object.height.clamp(20, 500),
                 min: 20,
                 max: 500,
                 onChanged: (value) {
-                  setState(() {
-                    object.height = value;
-                  });
+                  setState(() => object.height = value);
                 },
               ),
               _slider(
@@ -369,9 +525,7 @@ class _EditorScreenState extends State<EditorScreen> {
                 min: -180,
                 max: 180,
                 onChanged: (value) {
-                  setState(() {
-                    object.rotation = value;
-                  });
+                  setState(() => object.rotation = value);
                 },
               ),
             ],
@@ -420,18 +574,11 @@ class _EditorScreenState extends State<EditorScreen> {
         return SafeArea(
           child: ListView(
             shrinkWrap: true,
-            padding: const EdgeInsets.only(
-              bottom: 12,
-            ),
             children: tools.map((tool) {
               return ListTile(
-                leading: const Icon(
-                  Icons.add_circle_outline,
-                ),
+                leading: const Icon(Icons.add_circle_outline),
                 title: Text(
-                  widget.arabic
-                      ? tool.titleAr
-                      : tool.title,
+                  widget.arabic ? tool.titleAr : tool.title,
                 ),
                 onTap: () {
                   Navigator.pop(context);
@@ -472,32 +619,21 @@ class _EditorScreenState extends State<EditorScreen> {
           if (hasSelection && !propertiesVisible)
             IconButton(
               onPressed: () {
-                setState(() {
-                  propertiesVisible = true;
-                });
+                setState(() => propertiesVisible = true);
               },
               icon: const Icon(Icons.tune),
             ),
           IconButton(
             onPressed: openGameTypeMenu,
-            tooltip: widget.arabic
-                ? 'نوع اللعبة'
-                : 'Game type',
-            icon: const Icon(
-              Icons.category_outlined,
-            ),
+            icon: const Icon(Icons.category_outlined),
           ),
           IconButton(
             onPressed: load,
-            icon: const Icon(
-              Icons.folder_open,
-            ),
+            icon: const Icon(Icons.folder_open),
           ),
           IconButton(
             onPressed: save,
-            icon: const Icon(
-              Icons.save_outlined,
-            ),
+            icon: const Icon(Icons.save_outlined),
           ),
           IconButton(
             onPressed: () {
@@ -507,42 +643,31 @@ class _EditorScreenState extends State<EditorScreen> {
                   builder: (_) => SettingsScreen(
                     arabic: widget.arabic,
                     darkMode: widget.darkMode,
-                    onLanguageChanged:
-                        widget.onLanguageChanged,
-                    onThemeChanged:
-                        widget.onThemeChanged,
+                    onLanguageChanged: widget.onLanguageChanged,
+                    onThemeChanged: widget.onThemeChanged,
                   ),
                 ),
               );
             },
-            icon: const Icon(
-              Icons.settings_outlined,
-            ),
+            icon: const Icon(Icons.settings_outlined),
           ),
           IconButton(
             onPressed: () {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => GameRuntime(
-                    project: project,
-                  ),
+                  builder: (_) => GameRuntime(project: project),
                 ),
               );
             },
-            icon: const Icon(
-              Icons.play_arrow,
-            ),
+            icon: const Icon(Icons.play_arrow),
           ),
         ],
       ),
       body: Stack(
         children: [
-          Positioned.fill(
-            child: buildCanvas(),
-          ),
-          if (selected != null &&
-              propertiesVisible)
+          Positioned.fill(child: buildCanvas()),
+          if (selected != null && propertiesVisible)
             Positioned(
               left: 0,
               right: 0,
@@ -551,11 +676,7 @@ class _EditorScreenState extends State<EditorScreen> {
             ),
           Positioned(
             right: 16,
-            bottom:
-                selected != null &&
-                        propertiesVisible
-                    ? 350
-                    : 16,
+            bottom: selected != null && propertiesVisible ? 490 : 16,
             child: FloatingActionButton(
               heroTag: 'add',
               onPressed: openAddMenu,
@@ -570,22 +691,14 @@ class _EditorScreenState extends State<EditorScreen> {
 
 class GridPainter extends CustomPainter {
   @override
-  void paint(
-    Canvas canvas,
-    Size size,
-  ) {
+  void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color =
-          Colors.white.withOpacity(0.06)
+      ..color = Colors.white.withOpacity(0.06)
       ..strokeWidth = 1;
 
     const grid = 40.0;
 
-    for (
-      double x = 0;
-      x <= size.width;
-      x += grid
-    ) {
+    for (double x = 0; x <= size.width; x += grid) {
       canvas.drawLine(
         Offset(x, 0),
         Offset(x, size.height),
@@ -593,11 +706,7 @@ class GridPainter extends CustomPainter {
       );
     }
 
-    for (
-      double y = 0;
-      y <= size.height;
-      y += grid
-    ) {
+    for (double y = 0; y <= size.height; y += grid) {
       canvas.drawLine(
         Offset(0, y),
         Offset(size.width, y),
@@ -607,9 +716,7 @@ class GridPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(
-    covariant CustomPainter oldDelegate,
-  ) {
+  bool shouldRepaint(covariant CustomPainter oldDelegate) {
     return false;
   }
 }
