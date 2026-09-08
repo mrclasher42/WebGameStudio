@@ -14,10 +14,12 @@ import '../models/project.dart';
 
 class EditorScreen extends StatefulWidget {
   final Project project;
+  final VoidCallback? onSaved;
 
   const EditorScreen({
     super.key,
     required this.project,
+    this.onSaved,
   });
 
   @override
@@ -254,6 +256,8 @@ $html
     }
 
     await prefs.setStringList('projects', projects);
+
+    widget.onSaved?.call();
 
     if (!mounted) return;
 
