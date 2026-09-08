@@ -709,14 +709,14 @@ $html
     }
 
     try {
-      await saveProject(force: true);
+      await saveProject();
 
       final url = await LanServerService.instance.start(
-        projectId: widget.project.id,
+        projectId: widget.project.name,
         html: getCurrentHtml(),
         css: getCurrentCss(),
         js: getCurrentJs(),
-        singleFile: _singleFileMode,
+        singleFile: singleFileMode,
       );
 
       if (!mounted) {
