@@ -40,19 +40,16 @@ class _EditorScreenState extends State<EditorScreen> {
     htmlController = CodeController(
       text: widget.project.html,
       language: xml.xml,
-      theme: monokaiSublimeTheme,
     );
 
     cssController = CodeController(
       text: widget.project.css,
       language: css.css,
-      theme: monokaiSublimeTheme,
     );
 
     jsController = CodeController(
       text: widget.project.js,
       language: javascript.javascript,
-      theme: monokaiSublimeTheme,
     );
 
     htmlController.addListener(schedulePreview);
