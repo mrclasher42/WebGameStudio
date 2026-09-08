@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/material.dart';
 import 'package:code_text_field/code_text_field.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_highlight/themes/monokai-sublime.dart';
-import 'package:highlight/languages/xml.dart' as xml;
 import 'package:highlight/languages/css.dart' as css;
 import 'package:highlight/languages/javascript.dart' as javascript;
+import 'package:highlight/languages/xml.dart' as xml;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../models/project.dart';
@@ -31,6 +31,7 @@ class _EditorScreenState extends State<EditorScreen> {
   late WebViewController webController;
 
   int selectedTab = 0;
+  bool previewMode = false;
   Timer? previewTimer;
 
   @override
@@ -84,27 +85,165 @@ class _EditorScreenState extends State<EditorScreen> {
     final cssCode = cssController.text;
     final jsCode = jsController.text;
 
+    final safeJs = jsonEncode(jsCode);
+
     final document = '''
 <!DOCTYPE html>
 <html>
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
 $cssCode
+
+#wgs-error {
+  position: fixed;
+  z-index: 999999;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+  background: rgba(5, 7, 12, 0.96);
+  color: white;
+  font-family: Arial, sans-serif;
+}
+
+#wgs-error-box {
+  width: 100%;
+  max-width: 430px;
+  padding: 22px;
+  border-radius: 20px;
+  background: #151923;
+  border: 1px solid #3a404d;
+  box-shadow: 0 20px 60px rgba(0,0,0,.45);
+}
+
+#wgs-error-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  font-size: 19px;
+  font-weight: 700;
+}
+
+#wgs-error-icon {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(255, 70, 100, .14);
+  color: #ff526f;
+  font-size: 19px;
+}
+
+#wgs-error-message {
+  margin: 0;
+  padding: 14px;
+  border-radius: 12px;
+  background: #0b0e14;
+  color: #ff8da0;
+  font-family: monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#wgs-error-label {
+  margin-top: 13px;
+  color: #858b98;
+  font-size: 12px;
+}
 </style>
 </head>
 <body>
+
 $html
+
+<div id="wgs-error">
+  <div id="wgs-error-box">
+    <div id="wgs-error-title">
+      <div id="wgs-error-icon">!</div>
+      JavaScript Error
+    </div>
+    <pre id="wgs-error-message"></pre>
+    <div id="wgs-error-label">
+      Fix the code and the preview will update automatically.
+    </div>
+  </div>
+</div>
+
 <script>
-try {
-$jsCode
-} catch (error) {
-document.body.insertAdjacentHTML(
-'beforeend',
-'<pre style="color:red;padding:16px;">' + error + '</pre>'
-);
-}
+(function() {
+  const errorBox = document.getElementById("wgs-error");
+  const errorMessage = document.getElementById("wgs-error-message");
+
+  function showError(message) {
+    errorMessage.textContent = String(message);
+    errorBox.style.display = "flex";
+  }
+
+  window.addEventListener("error", function(event) {
+    if (event.error) {
+      showError(event.error.stack || event.error.message || event.message);
+    } else {
+      showError(event.message);
+    }
+  });
+
+  window.addEventListener("unhandledrejection", function(event) {
+    showError(
+      event.reason && event.reason.stack
+        ? event.reason.stack
+        : String(event.reason)
+    );
+  });
+
+  const originalConsoleError = console.error;
+
+  console.error = function() {
+    const message = Array.from(arguments)
+      .map(value => {
+        try {
+          return typeof value === "string"
+            ? value
+            : JSON.stringify(value);
+        } catch (_) {
+          return String(value);
+        }
+      })
+      .join(" ");
+
+    showError(message);
+    originalConsoleError.apply(console, arguments);
+  };
+
+  try {
+    const userCode = $safeJs;
+    const runUserCode = new Function(userCode);
+    runUserCode();
+  } catch (error) {
+    showError(error && error.stack ? error.stack : error);
+  }
+})();
 </script>
+
 </body>
 </html>
 ''';
@@ -160,6 +299,20 @@ document.body.insertAdjacentHTML(
     );
   }
 
+  void openPreview() {
+    setState(() {
+      previewMode = true;
+    });
+
+    loadPreview();
+  }
+
+  void closePreview() {
+    setState(() {
+      previewMode = false;
+    });
+  }
+
   Widget buildEditor() {
     final controller = selectedTab == 0
         ? htmlController
@@ -168,7 +321,7 @@ document.body.insertAdjacentHTML(
             : jsController;
 
     return CodeTheme(
-      data: const CodeThemeData(
+      data: CodeThemeData(
         styles: monokaiSublimeTheme,
       ),
       child: CodeField(
@@ -189,8 +342,65 @@ document.body.insertAdjacentHTML(
     );
   }
 
+  Widget buildPreview() {
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: Container(
+            color: Colors.white,
+            child: WebViewWidget(
+              controller: webController,
+            ),
+          ),
+        ),
+        Positioned(
+          top: 14,
+          right: 14,
+          child: SafeArea(
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: closePreview,
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(.72),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: Colors.white.withOpacity(.14),
+                    ),
+                    boxShadow: const [
+                      BoxShadow(
+                        blurRadius: 18,
+                        color: Colors.black38,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    color: Colors.white,
+                    size: 21,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (previewMode) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: buildPreview(),
+      );
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFF080A0F),
       appBar: AppBar(
@@ -204,11 +414,13 @@ document.body.insertAdjacentHTML(
         ),
         actions: [
           IconButton(
-            onPressed: loadPreview,
-            icon: const Icon(Icons.refresh),
+            onPressed: openPreview,
+            tooltip: 'Preview',
+            icon: const Icon(Icons.play_arrow_rounded),
           ),
           IconButton(
             onPressed: saveProject,
+            tooltip: 'Save',
             icon: const Icon(Icons.save_outlined),
           ),
         ],
@@ -216,26 +428,25 @@ document.body.insertAdjacentHTML(
       body: Column(
         children: [
           Container(
-            height: 48,
+            height: 50,
             color: const Color(0xFF0D1017),
             child: Row(
               children: [
                 tabButton('HTML', 0),
                 tabButton('CSS', 1),
                 tabButton('JS', 2),
-                tabButton('Preview', 3),
               ],
             ),
           ),
           Expanded(
-            child: selectedTab == 3
-                ? Container(
-                    color: Colors.white,
-                    child: WebViewWidget(controller: webController),
-                  )
-                : buildEditor(),
+            child: buildEditor(),
           ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: openPreview,
+        backgroundColor: const Color(0xFF7C5CFF),
+        child: const Icon(Icons.play_arrow_rounded),
       ),
     );
   }
@@ -245,7 +456,11 @@ document.body.insertAdjacentHTML(
 
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => selectedTab = index),
+        onTap: () {
+          setState(() {
+            selectedTab = index;
+          });
+        },
         child: Container(
           alignment: Alignment.center,
           decoration: BoxDecoration(
@@ -262,7 +477,9 @@ document.body.insertAdjacentHTML(
             title,
             style: TextStyle(
               color: active ? Colors.white : Colors.white54,
-              fontWeight: active ? FontWeight.bold : FontWeight.normal,
+              fontWeight: active
+                  ? FontWeight.bold
+                  : FontWeight.normal,
             ),
           ),
         ),
