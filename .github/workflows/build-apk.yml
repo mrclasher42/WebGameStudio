@@ -40,7 +40,7 @@ jobs:
 
           if 'android:extractNativeLibs="true"' not in s:
               s = s.replace(
-                  '<application',
+                  "<application",
                   '<application\n        android:extractNativeLibs="true"',
                   1,
               )
@@ -51,16 +51,23 @@ jobs:
       - name: Get Flutter dependencies
         run: flutter pub get
 
-      - name: Prepare Python package
+      - name: Prepare Python runtime
         run: |
           echo "SERIOUS_PYTHON_VERSION=3.12" >> "$GITHUB_ENV"
-          mkdir -p assets/python
-          dart run serious_python:main package --asset assets/python/app.zip python/server -p Android
+          echo "SERIOUS_PYTHON_SITE_PACKAGES=$GITHUB_WORKSPACE/build/site-packages" >> "$GITHUB_ENV"
+          echo "SERIOUS_PYTHON_APP=$GITHUB_WORKSPACE/build/python-app" >> "$GITHUB_ENV"
 
-      - name: Verify Python package
+          mkdir -p "$GITHUB_WORKSPACE/build/site-packages"
+          mkdir -p "$GITHUB_WORKSPACE/build/python-app"
+
+          dart run serious_python:main package python/server -p Android
+
+      - name: Verify Python runtime
         run: |
-          test -f assets/python/app.zip
-          ls -lh assets/python/app.zip
+          test -f build/python-app/server.py
+          test -d build/site-packages
+          ls -la build/python-app
+          ls -la build/site-packages
 
       - name: Build release APK
         run: flutter build apk --release
