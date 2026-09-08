@@ -1,6 +1,8 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/project.dart';
 import 'editor_screen.dart';
 
@@ -21,6 +23,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   List<Project> projects = [];
+
   late AnimationController animationController;
   late Animation<double> fadeAnimation;
   late Animation<Offset> slideAnimation;
@@ -183,67 +186,118 @@ class _HomeScreenState extends State<HomeScreen>
     setState(() {});
   }
 
-  void openSettings() {
+  Future<void> openSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    final initialSingleFile = prefs.getBool('singleFileMode') ?? false;
+
+    if (!mounted) return;
+
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Settings',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
+      builder: (sheetContext) {
+        bool singleFileMode = initialSingleFile;
+
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Settings',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 20),
+                    ListTile(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      leading: Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .primary
+                              .withOpacity(.12),
+                          borderRadius: BorderRadius.circular(13),
+                        ),
+                        child: Icon(
+                          widget.darkMode
+                              ? Icons.dark_mode_rounded
+                              : Icons.light_mode_rounded,
+                        ),
+                      ),
+                      title: Text(
+                        widget.darkMode ? 'Dark Theme' : 'Light Theme',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      subtitle: const Text('Choose app appearance'),
+                      trailing: Switch(
+                        value: widget.darkMode,
+                        onChanged: (value) {
+                          widget.onThemeChanged(value);
+                          Navigator.pop(sheetContext);
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ListTile(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      leading: Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .primary
+                              .withOpacity(.12),
+                          borderRadius: BorderRadius.circular(13),
+                        ),
+                        child: const Icon(Icons.description_rounded),
+                      ),
+                      title: const Text(
+                        'Single File Mode',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      subtitle: const Text(
+                        'Edit HTML, CSS and JavaScript in one file',
+                      ),
+                      trailing: Switch(
+                        value: singleFileMode,
+                        onChanged: (value) async {
+                          setSheetState(() {
+                            singleFileMode = value;
+                          });
+
+                          await prefs.setBool(
+                            'singleFileMode',
+                            value,
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 20),
-                ListTile(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  leading: Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .primary
-                          .withOpacity(.12),
-                      borderRadius: BorderRadius.circular(13),
-                    ),
-                    child: Icon(
-                      widget.darkMode
-                          ? Icons.dark_mode_rounded
-                          : Icons.light_mode_rounded,
-                    ),
-                  ),
-                  title: Text(
-                    widget.darkMode ? 'Dark Theme' : 'Light Theme',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  subtitle: const Text('Choose app appearance'),
-                  trailing: Switch(
-                    value: widget.darkMode,
-                    onChanged: (value) {
-                      widget.onThemeChanged(value);
-                      Navigator.pop(context);
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
@@ -260,170 +314,174 @@ class _HomeScreenState extends State<HomeScreen>
           child: SlideTransition(
             position: slideAnimation,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: isDark
-                                ? const [
-                                    Color(0xFF7C5CFF),
-                                    Color(0xFF4D7CFE),
-                                  ]
-                                : const [
-                                    Color(0xFF6D4AFF),
-                                    Color(0xFF8266FF),
-                                  ],
-                          ),
-                          borderRadius: BorderRadius.circular(15),
-                        ),
-                        child: const Icon(
-                          Icons.code_rounded,
-                          color: Colors.white,
-                          size: 25,
-                        ),
-                      ),
-                      const SizedBox(width: 13),
-                      const Expanded(
-                        child: Text(
-                          'Web Game Studio',
-                          style: TextStyle(
-                            fontSize: 21,
-                            fontWeight: FontWeight.w800,
-                          ),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Web Game Studio',
+                              style: TextStyle(
+                                fontSize: 27,
+                                fontWeight: FontWeight.w900,
+                                color: isDark
+                                    ? Colors.white
+                                    : const Color(0xFF171923),
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              'Create. Code. Preview.',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: isDark
+                                    ? Colors.white54
+                                    : Colors.black45,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       IconButton(
                         onPressed: openSettings,
-                        icon: const Icon(
-                          Icons.settings_outlined,
+                        icon: const Icon(Icons.settings_rounded),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 28),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Projects',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            color: isDark
+                                ? Colors.white
+                                : const Color(0xFF171923),
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '${projects.length}',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: Theme.of(context).colorScheme.primary,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 34),
-                  const Text(
-                    'Create something.',
-                    style: TextStyle(
-                      fontSize: 29,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -.7,
-                    ),
-                  ),
-                  const SizedBox(height: 7),
-                  Text(
-                    'HTML • CSS • JS',
-                    style: TextStyle(
-                      color: Theme.of(context)
-                          .textTheme
-                          .bodyMedium
-                          ?.color
-                          ?.withOpacity(.55),
-                      fontSize: 15,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 58,
-                    child: FilledButton.icon(
-                      onPressed: createProject,
-                      icon: const Icon(Icons.add_rounded),
-                      label: const Text(
-                        'New Project',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 30),
-                  const Text(
-                    'Projects',
-                    style: TextStyle(
-                      fontSize: 19,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 14),
                   Expanded(
                     child: projects.isEmpty
                         ? Center(
-                            child: Text(
-                              'No projects yet',
-                              style: TextStyle(
-                                color: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.color
-                                    ?.withOpacity(.4),
-                                fontSize: 16,
-                              ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.code_rounded,
+                                  size: 52,
+                                  color: isDark
+                                      ? Colors.white24
+                                      : Colors.black26,
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'No projects yet',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: isDark
+                                        ? Colors.white60
+                                        : Colors.black54,
+                                  ),
+                                ),
+                                const SizedBox(height: 5),
+                                Text(
+                                  'Create your first project',
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? Colors.white38
+                                        : Colors.black38,
+                                  ),
+                                ),
+                              ],
                             ),
                           )
-                        : ListView.builder(
-                            physics: const BouncingScrollPhysics(),
+                        : ListView.separated(
                             itemCount: projects.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 10),
                             itemBuilder: (context, index) {
                               final project = projects[index];
 
-                              return Container(
-                                margin:
-                                    const EdgeInsets.only(bottom: 10),
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .surfaceContainerHighest
-                                      .withOpacity(.35),
-                                  borderRadius:
-                                      BorderRadius.circular(18),
+                              return Dismissible(
+                                key: ValueKey(
+                                  '${project.name}_$index',
                                 ),
-                                child: ListTile(
-                                  contentPadding:
-                                      const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 6,
+                                direction: DismissDirection.endToStart,
+                                onDismissed: (_) => deleteProject(index),
+                                background: Container(
+                                  alignment: Alignment.centerRight,
+                                  padding:
+                                      const EdgeInsets.only(right: 20),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.withOpacity(.12),
+                                    borderRadius:
+                                        BorderRadius.circular(18),
                                   ),
-                                  leading: Container(
-                                    width: 44,
-                                    height: 44,
-                                    decoration: BoxDecoration(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .primary
-                                          .withOpacity(.12),
-                                      borderRadius:
-                                          BorderRadius.circular(13),
-                                    ),
-                                    child: Icon(
-                                      Icons.code_rounded,
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .primary,
-                                    ),
+                                  child: const Icon(
+                                    Icons.delete_outline_rounded,
+                                    color: Colors.red,
                                   ),
-                                  title: Text(
-                                    project.name,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
+                                ),
+                                child: Card(
+                                  elevation: 0,
+                                  margin: EdgeInsets.zero,
+                                  child: ListTile(
+                                    contentPadding:
+                                        const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 8,
                                     ),
-                                  ),
-                                  subtitle:
-                                      const Text('HTML • CSS • JS'),
-                                  onTap: () => openProject(project),
-                                  trailing: IconButton(
-                                    icon: const Icon(
-                                      Icons.delete_outline_rounded,
+                                    leading: Container(
+                                      width: 48,
+                                      height: 48,
+                                      decoration: BoxDecoration(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary
+                                            .withOpacity(.12),
+                                        borderRadius:
+                                            BorderRadius.circular(14),
+                                      ),
+                                      child: Icon(
+                                        Icons.code_rounded,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                      ),
                                     ),
-                                    onPressed: () =>
-                                        deleteProject(index),
+                                    title: Text(
+                                      project.name,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                    subtitle: const Text(
+                                      'HTML • CSS • JavaScript',
+                                    ),
+                                    trailing: const Icon(
+                                      Icons.chevron_right_rounded,
+                                    ),
+                                    onTap: () => openProject(project),
                                   ),
                                 ),
                               );
@@ -435,6 +493,11 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
         ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: createProject,
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('New Project'),
       ),
     );
   }

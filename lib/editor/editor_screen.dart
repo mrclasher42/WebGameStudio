@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:code_text_field/code_text_field.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_highlight/themes/github.dart';
 import 'package:flutter_highlight/themes/monokai-sublime.dart';
 import 'package:highlight/languages/css.dart' as css;
 import 'package:highlight/languages/javascript.dart' as javascript;
@@ -27,38 +28,23 @@ class EditorScreen extends StatefulWidget {
 }
 
 class _EditorScreenState extends State<EditorScreen> {
-  late final CodeController htmlController;
-  late final CodeController cssController;
-  late final CodeController jsController;
+  CodeController? htmlController;
+  CodeController? cssController;
+  CodeController? jsController;
+  CodeController? singleController;
 
   late final WebViewController webViewController;
 
   int selectedTab = 0;
   bool previewMode = false;
+  bool singleFileMode = false;
+  bool settingsLoaded = false;
+
   Timer? previewTimer;
 
   @override
   void initState() {
     super.initState();
-
-    htmlController = CodeController(
-      text: widget.project.html,
-      language: xml.xml,
-    );
-
-    cssController = CodeController(
-      text: widget.project.css,
-      language: css.css,
-    );
-
-    jsController = CodeController(
-      text: widget.project.js,
-      language: javascript.javascript,
-    );
-
-    htmlController.addListener(schedulePreview);
-    cssController.addListener(schedulePreview);
-    jsController.addListener(schedulePreview);
 
     webViewController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -76,6 +62,61 @@ class _EditorScreenState extends State<EditorScreen> {
           },
         ),
       );
+
+    loadEditorMode();
+  }
+
+  Future<void> loadEditorMode() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final enabled = prefs.getBool('singleFileMode') ?? false;
+
+    if (!mounted) return;
+
+    if (enabled) {
+      final combined = '''${widget.project.html}
+
+<style>
+${widget.project.css}
+</style>
+
+<script>
+${widget.project.js}
+</script>''';
+
+      singleController = CodeController(
+        text: combined,
+        language: xml.xml,
+      );
+    } else {
+      htmlController = CodeController(
+        text: widget.project.html,
+        language: xml.xml,
+      );
+
+      cssController = CodeController(
+        text: widget.project.css,
+        language: css.css,
+      );
+
+      jsController = CodeController(
+        text: widget.project.js,
+        language: javascript.javascript,
+      );
+
+      htmlController!.addListener(schedulePreview);
+      cssController!.addListener(schedulePreview);
+      jsController!.addListener(schedulePreview);
+    }
+
+    setState(() {
+      singleFileMode = enabled;
+      settingsLoaded = true;
+    });
+
+    if (enabled) {
+      singleController!.addListener(schedulePreview);
+    }
   }
 
   void schedulePreview() {
@@ -89,10 +130,130 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
+  String getCurrentHtml() {
+    if (singleFileMode) {
+      return singleController?.text ?? '';
+    }
+
+    return htmlController?.text ?? '';
+  }
+
+  String getCurrentCss() {
+    if (singleFileMode) {
+      return '';
+    }
+
+    return cssController?.text ?? '';
+  }
+
+  String getCurrentJs() {
+    if (singleFileMode) {
+      return '';
+    }
+
+    return jsController?.text ?? '';
+  }
+
   String buildPreviewDocument() {
-    final html = htmlController.text;
-    final cssCode = cssController.text;
-    final jsCode = jsController.text;
+    final html = getCurrentHtml();
+    final cssCode = getCurrentCss();
+    final jsCode = getCurrentJs();
+
+    if (singleFileMode) {
+      return '''
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<style>
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+#wgs-error {
+  position: fixed;
+  left: 14px;
+  right: 14px;
+  top: 14px;
+  z-index: 999999;
+  display: none;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(20, 20, 24, 0.96);
+  color: #ff6b6b;
+  font-family: sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  border: 1px solid rgba(255,107,107,.35);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+</style>
+</head>
+<body>
+
+$html
+
+<div id="wgs-error"></div>
+
+<script>
+(function () {
+  const errorBox = document.getElementById('wgs-error');
+
+  function showError(message) {
+    if (!errorBox) return;
+    errorBox.textContent = message;
+    errorBox.style.display = 'block';
+  }
+
+  window.onerror = function(message, source, line) {
+    showError(
+      'JavaScript Error\\n' +
+      String(message || 'Unknown error') +
+      (line ? '\\nLine: ' + line : '')
+    );
+    return true;
+  };
+
+  window.addEventListener('unhandledrejection', function(event) {
+    showError(
+      'Promise Error\\n' +
+      String(event.reason || 'Unknown promise error')
+    );
+  });
+
+  const originalConsoleError = console.error;
+
+  console.error = function() {
+    try {
+      showError(
+        'Console Error\\n' +
+        Array.from(arguments).map(String).join(' ')
+      );
+    } catch (_) {}
+
+    originalConsoleError.apply(console, arguments);
+  };
+})();
+</script>
+
+</body>
+</html>
+''';
+    }
 
     final safeJs = jsonEncode(jsCode);
 
@@ -153,12 +314,11 @@ $html
 
   function showError(message) {
     if (!errorBox) return;
-
     errorBox.textContent = message;
     errorBox.style.display = 'block';
   }
 
-  window.onerror = function(message, source, line, column, error) {
+  window.onerror = function(message, source, line) {
     showError(
       'JavaScript Error\\n' +
       String(message || 'Unknown error') +
@@ -226,14 +386,27 @@ $html
 
   Future<void> saveProject() async {
     final prefs = await SharedPreferences.getInstance();
-
     final projects = prefs.getStringList('projects') ?? [];
+
+    String html;
+    String cssCode;
+    String jsCode;
+
+    if (singleFileMode) {
+      html = singleController?.text ?? '';
+      cssCode = '';
+      jsCode = '';
+    } else {
+      html = htmlController?.text ?? '';
+      cssCode = cssController?.text ?? '';
+      jsCode = jsController?.text ?? '';
+    }
 
     final updatedProject = Project(
       name: widget.project.name,
-      html: htmlController.text,
-      css: cssController.text,
-      js: jsController.text,
+      html: html,
+      css: cssCode,
+      js: jsCode,
     );
 
     final encoded = jsonEncode(updatedProject.toJson());
@@ -286,33 +459,168 @@ $html
   }
 
   Widget buildCodeEditor() {
+    if (singleFileMode) {
+      return Expanded(
+        child: buildCodeField(
+          singleController!,
+          xml.xml,
+        ),
+      );
+    }
+
     late CodeController controller;
 
     if (selectedTab == 0) {
-      controller = htmlController;
+      controller = htmlController!;
     } else if (selectedTab == 1) {
-      controller = cssController;
+      controller = cssController!;
     } else {
-      controller = jsController;
+      controller = jsController!;
     }
 
     return Expanded(
-      child: CodeTheme(
-        data: CodeThemeData(
-          styles: monokaiSublimeTheme,
-        ),
+      child: buildCodeField(
+        controller,
+        selectedTab == 0
+            ? xml.xml
+            : selectedTab == 1
+                ? css.css
+                : javascript.javascript,
+      ),
+    );
+  }
+
+  Widget buildCodeField(
+    CodeController controller,
+    dynamic language,
+  ) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+
+    return CodeTheme(
+      data: CodeThemeData(
+        styles: dark ? monokaiSublimeTheme : githubTheme,
+      ),
+      child: Container(
+        color: dark
+            ? const Color(0xFF15171C)
+            : const Color(0xFFFAFAFC),
         child: CodeField(
           controller: controller,
           expands: true,
-          textStyle: const TextStyle(
+          textStyle: TextStyle(
             fontFamily: 'monospace',
             fontSize: 14,
-            height: 1.5,
+            height: 1.55,
+            color: dark
+                ? Colors.white
+                : const Color(0xFF20222B),
           ),
-          background: const Color(0xFF15171C),
+          background: dark
+              ? const Color(0xFF15171C)
+              : const Color(0xFFFAFAFC),
           padding: const EdgeInsets.all(16),
-          cursorColor: Colors.white,
+          cursorColor: Theme.of(context).colorScheme.primary,
           keyboardType: TextInputType.multiline,
+        ),
+      ),
+    );
+  }
+
+  Widget buildTabs() {
+    if (singleFileMode) {
+      return Container(
+        margin: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+        padding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 11,
+        ),
+        decoration: BoxDecoration(
+          color: Theme.of(context)
+              .colorScheme
+              .surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.description_rounded,
+              size: 19,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(width: 9),
+            const Text(
+              'index.html',
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              'HTML • CSS • JS',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Theme.of(context)
+            .colorScheme
+            .surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          buildTab('HTML', 0),
+          buildTab('CSS', 1),
+          buildTab('JS', 2),
+        ],
+      ),
+    );
+  }
+
+  Widget buildTab(String title, int index) {
+    final selected = selectedTab == index;
+
+    return Expanded(
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            selectedTab = index;
+          });
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(vertical: 11),
+          decoration: BoxDecoration(
+            color: selected
+                ? Theme.of(context).colorScheme.primary
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Center(
+            child: Text(
+              title,
+              style: TextStyle(
+                color: selected
+                    ? Colors.white
+                    : Theme.of(context)
+                        .colorScheme
+                        .onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -361,6 +669,15 @@ $html
 
   @override
   Widget build(BuildContext context) {
+    if (!settingsLoaded) {
+      return Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        body: const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
     if (previewMode) {
       return Scaffold(
         backgroundColor: Colors.black,
@@ -389,21 +706,7 @@ $html
       ),
       body: Column(
         children: [
-          Container(
-            margin: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              children: [
-                buildTab('HTML', 0),
-                buildTab('CSS', 1),
-                buildTab('JS', 2),
-              ],
-            ),
-          ),
+          buildTabs(),
           buildCodeEditor(),
         ],
       ),
@@ -415,48 +718,14 @@ $html
     );
   }
 
-  Widget buildTab(String title, int index) {
-    final selected = selectedTab == index;
-
-    return Expanded(
-      child: GestureDetector(
-        onTap: () {
-          setState(() {
-            selectedTab = index;
-          });
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(vertical: 11),
-          decoration: BoxDecoration(
-            color: selected
-                ? Theme.of(context).colorScheme.primary
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Center(
-            child: Text(
-              title,
-              style: TextStyle(
-                color: selected
-                    ? Colors.white
-                    : Theme.of(context).colorScheme.onSurfaceVariant,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   void dispose() {
     previewTimer?.cancel();
 
-    htmlController.dispose();
-    cssController.dispose();
-    jsController.dispose();
+    htmlController?.dispose();
+    cssController?.dispose();
+    jsController?.dispose();
+    singleController?.dispose();
 
     super.dispose();
   }
