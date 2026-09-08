@@ -20,11 +20,13 @@ class _WebGameStudioState extends State<WebGameStudio> {
   @override
   void initState() {
     super.initState();
-    loadSettings();
+    _loadSettings();
   }
 
-  Future<void> loadSettings() async {
+  Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
+
+    if (!mounted) return;
 
     setState(() {
       arabic = prefs.getBool('arabic') ?? true;
@@ -32,7 +34,7 @@ class _WebGameStudioState extends State<WebGameStudio> {
     });
   }
 
-  Future<void> setLanguage(bool value) async {
+  Future<void> _setLanguage(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('arabic', value);
 
@@ -41,7 +43,7 @@ class _WebGameStudioState extends State<WebGameStudio> {
     });
   }
 
-  Future<void> setTheme(bool value) async {
+  Future<void> _setTheme(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('darkMode', value);
 
@@ -56,16 +58,20 @@ class _WebGameStudioState extends State<WebGameStudio> {
       debugShowCheckedModeBanner: false,
       title: 'Web Game Studio',
       themeMode: darkMode ? ThemeMode.dark : ThemeMode.light,
-      darkTheme: ThemeData.dark(useMaterial3: true),
       theme: ThemeData(
+        colorSchemeSeed: Colors.blue,
+        useMaterial3: true,
+      ),
+      darkTheme: ThemeData(
+        brightness: Brightness.dark,
         colorSchemeSeed: Colors.blue,
         useMaterial3: true,
       ),
       home: EditorScreen(
         arabic: arabic,
         darkMode: darkMode,
-        onLanguageChanged: setLanguage,
-        onThemeChanged: setTheme,
+        onLanguageChanged: _setLanguage,
+        onThemeChanged: _setTheme,
       ),
     );
   }

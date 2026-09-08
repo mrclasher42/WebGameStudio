@@ -3,7 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/game_project.dart';
 
 class ProjectStorage {
-  static const String key = 'web_game_studio_project';
+  static const key = 'web_game_studio_project';
 
   static Future<void> save(GameProject project) async {
     final prefs = await SharedPreferences.getInstance();
@@ -14,10 +14,16 @@ class ProjectStorage {
     final prefs = await SharedPreferences.getInstance();
     final value = prefs.getString(key);
 
-    if (value == null) {
+    if (value == null || value.isEmpty) {
       return null;
     }
 
-    return GameProject.fromMap(jsonDecode(value));
+    try {
+      return GameProject.fromMap(
+        Map<String, dynamic>.from(jsonDecode(value)),
+      );
+    } catch (_) {
+      return null;
+    }
   }
 }

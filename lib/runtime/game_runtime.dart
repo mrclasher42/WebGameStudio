@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-
 import '../models/game_project.dart';
 import 'game_html.dart';
 
@@ -17,13 +16,13 @@ class GameRuntime extends StatefulWidget {
 }
 
 class _GameRuntimeState extends State<GameRuntime> {
-  late final WebViewController _controller;
+  late final WebViewController controller;
 
   @override
   void initState() {
     super.initState();
 
-    _controller = WebViewController()
+    controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.black)
       ..loadHtmlString(GameHtml.generate(widget.project));
@@ -38,7 +37,9 @@ class _GameRuntimeState extends State<GameRuntime> {
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
       ),
-      body: WebViewWidget(controller: _controller),
+      body: Center(
+        child: WebViewWidget(controller: controller),
+      ),
     );
   }
 }

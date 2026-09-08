@@ -1,55 +1,79 @@
 import 'game_object.dart';
 import 'game_type.dart';
-import 'game_variable.dart';
+
+class GameScene {
+  String name;
+  List<GameObject> objects;
+
+  GameScene({
+    this.name = 'Scene',
+    List<GameObject>? objects,
+  }) : objects = objects ?? [];
+
+  Map<String, dynamic> toMap() {
+    return {
+      'name': name,
+      'objects': objects.map((e) => e.toMap()).toList(),
+    };
+  }
+
+  factory GameScene.fromMap(Map<String, dynamic> map) {
+    return GameScene(
+      name: map['name']?.toString() ?? 'Scene',
+      objects: ((map['objects'] ?? []) as List)
+          .map((e) => GameObject.fromMap(Map<String, dynamic>.from(e)))
+          .toList(),
+    );
+  }
+}
 
 class GameProject {
   String name;
   GameType gameType;
-  double worldWidth;
-  double worldHeight;
-  List<GameObject> objects;
-  List<GameVariable> variables;
+  double width;
+  double height;
+  String globalCss;
+  String globalLogic;
+  String music;
+  List<GameScene> scenes;
 
   GameProject({
     this.name = 'My Game',
     this.gameType = GameType.custom,
-    this.worldWidth = 2400,
-    this.worldHeight = 1400,
-    List<GameObject>? objects,
-    List<GameVariable>? variables,
-  })  : objects = objects ?? [],
-        variables = variables ?? [];
+    this.width = 1280,
+    this.height = 720,
+    this.globalCss = '',
+    this.globalLogic = '',
+    this.music = '',
+    List<GameScene>? scenes,
+  }) : scenes = scenes ?? [GameScene(name: 'Main')];
 
   Map<String, dynamic> toMap() {
     return {
       'name': name,
       'gameType': gameType.id,
-      'worldWidth': worldWidth,
-      'worldHeight': worldHeight,
-      'objects': objects.map((e) => e.toMap()).toList(),
-      'variables': variables.map((e) => e.toMap()).toList(),
+      'width': width,
+      'height': height,
+      'globalCss': globalCss,
+      'globalLogic': globalLogic,
+      'music': music,
+      'scenes': scenes.map((e) => e.toMap()).toList(),
     };
   }
 
   factory GameProject.fromMap(Map<String, dynamic> map) {
+    final rawScenes = (map['scenes'] ?? []) as List;
+
     return GameProject(
       name: map['name']?.toString() ?? 'My Game',
-      gameType: GameTypeExtension.fromId(map['gameType']),
-      worldWidth: (map['worldWidth'] as num?)?.toDouble() ?? 2400,
-      worldHeight: (map['worldHeight'] as num?)?.toDouble() ?? 1400,
-      objects: ((map['objects'] ?? []) as List)
-          .map(
-            (e) => GameObject.fromMap(
-              Map<String, dynamic>.from(e),
-            ),
-          )
-          .toList(),
-      variables: ((map['variables'] ?? []) as List)
-          .map(
-            (e) => GameVariable.fromMap(
-              Map<String, dynamic>.from(e),
-            ),
-          )
+      gameType: GameTypeInfo.fromId(map['gameType']),
+      width: (map['width'] as num?)?.toDouble() ?? 1280,
+      height: (map['height'] as num?)?.toDouble() ?? 720,
+      globalCss: map['globalCss']?.toString() ?? '',
+      globalLogic: map['globalLogic']?.toString() ?? '',
+      music: map['music']?.toString() ?? '',
+      scenes: rawScenes
+          .map((e) => GameScene.fromMap(Map<String, dynamic>.from(e)))
           .toList(),
     );
   }
