@@ -938,6 +938,22 @@ $html
                     ),
             ),
             IconButton(
+              tooltip: _lanServerRunning
+                  ? 'LAN Server يعمل'
+                  : 'تشغيل LAN Server',
+              onPressed: _lanServerRunning
+                  ? _showLanServerStatus
+                  : _toggleLanServer,
+              icon: Icon(
+                _lanServerRunning
+                    ? Icons.wifi_tethering_rounded
+                    : Icons.wifi_tethering_off_rounded,
+                color: _lanServerRunning
+                    ? Theme.of(context).colorScheme.primary
+                    : null,
+              ),
+            ),
+            IconButton(
               onPressed: openPreview,
               icon: const Icon(Icons.play_arrow_rounded),
             ),
