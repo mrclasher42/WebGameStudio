@@ -8,6 +8,8 @@ environment:
 
 dependencies:
   flutter:
+  assets:
+    - assets/python/app.zip
     sdk: flutter
   webview_flutter: ^4.10.0
   shared_preferences: ^2.5.3
