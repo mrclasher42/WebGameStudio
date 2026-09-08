@@ -1,3 +1,5 @@
+import 'game_event.dart';
+
 class GameObject {
   final String id;
   String type;
@@ -7,6 +9,7 @@ class GameObject {
   double height;
   double rotation;
   Map<String, dynamic> data;
+  List<GameEvent> events;
 
   GameObject({
     required this.id,
@@ -17,7 +20,9 @@ class GameObject {
     this.height = 70,
     this.rotation = 0,
     Map<String, dynamic>? data,
-  }) : data = data ?? {};
+    List<GameEvent>? events,
+  })  : data = data ?? {},
+        events = events ?? [];
 
   Map<String, dynamic> toMap() {
     return {
@@ -29,6 +34,7 @@ class GameObject {
       'height': height,
       'rotation': rotation,
       'data': data,
+      'events': events.map((e) => e.toMap()).toList(),
     };
   }
 
@@ -46,6 +52,13 @@ class GameObject {
       height: (map['height'] as num?)?.toDouble() ?? 70,
       rotation: (map['rotation'] as num?)?.toDouble() ?? 0,
       data: Map<String, dynamic>.from(map['data'] ?? {}),
+      events: ((map['events'] ?? []) as List)
+          .map(
+            (e) => GameEvent.fromMap(
+              Map<String, dynamic>.from(e),
+            ),
+          )
+          .toList(),
     );
   }
 
