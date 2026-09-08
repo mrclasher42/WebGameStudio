@@ -1,25 +1,25 @@
-import 'dart:convert';
-
 class GameObject {
-  String id;
+  final String id;
   String type;
   double x;
   double y;
   double width;
   double height;
   double rotation;
+  Map<String, dynamic> data;
 
   GameObject({
     required this.id,
     required this.type,
-    required this.x,
-    required this.y,
-    required this.width,
-    required this.height,
+    this.x = 0,
+    this.y = 0,
+    this.width = 100,
+    this.height = 100,
     this.rotation = 0,
-  });
+    Map<String, dynamic>? data,
+  }) : data = data ?? {};
 
-  Map<String, dynamic> toMap() {
+  Map<String, dynamic> toJson() {
     return {
       'id': id,
       'type': type,
@@ -28,24 +28,20 @@ class GameObject {
       'width': width,
       'height': height,
       'rotation': rotation,
+      'data': data,
     };
   }
 
-  factory GameObject.fromMap(Map<String, dynamic> map) {
+  factory GameObject.fromJson(Map<String, dynamic> json) {
     return GameObject(
-      id: map['id'],
-      type: map['type'],
-      x: (map['x'] ?? 0).toDouble(),
-      y: (map['y'] ?? 0).toDouble(),
-      width: (map['width'] ?? 60).toDouble(),
-      height: (map['height'] ?? 60).toDouble(),
-      rotation: (map['rotation'] ?? 0).toDouble(),
+      id: json['id'] as String,
+      type: json['type'] as String,
+      x: (json['x'] as num?)?.toDouble() ?? 0,
+      y: (json['y'] as num?)?.toDouble() ?? 0,
+      width: (json['width'] as num?)?.toDouble() ?? 100,
+      height: (json['height'] as num?)?.toDouble() ?? 100,
+      rotation: (json['rotation'] as num?)?.toDouble() ?? 0,
+      data: Map<String, dynamic>.from(json['data'] ?? {}),
     );
-  }
-
-  String toJson() => jsonEncode(toMap());
-
-  factory GameObject.fromJson(String value) {
-    return GameObject.fromMap(jsonDecode(value));
   }
 }
