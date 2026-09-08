@@ -19,7 +19,7 @@ class GameObject {
     Map<String, dynamic>? data,
   }) : data = data ?? {};
 
-  Map<String, dynamic> toJson() {
+  Map<String, dynamic> toMap() {
     return {
       'id': id,
       'type': type,
@@ -32,16 +32,24 @@ class GameObject {
     };
   }
 
-  factory GameObject.fromJson(Map<String, dynamic> json) {
+  Map<String, dynamic> toJson() {
+    return toMap();
+  }
+
+  factory GameObject.fromMap(Map<String, dynamic> map) {
     return GameObject(
-      id: json['id'] as String,
-      type: json['type'] as String,
-      x: (json['x'] as num?)?.toDouble() ?? 0,
-      y: (json['y'] as num?)?.toDouble() ?? 0,
-      width: (json['width'] as num?)?.toDouble() ?? 100,
-      height: (json['height'] as num?)?.toDouble() ?? 100,
-      rotation: (json['rotation'] as num?)?.toDouble() ?? 0,
-      data: Map<String, dynamic>.from(json['data'] ?? {}),
+      id: map['id'] as String,
+      type: map['type'] as String,
+      x: (map['x'] as num?)?.toDouble() ?? 0,
+      y: (map['y'] as num?)?.toDouble() ?? 0,
+      width: (map['width'] as num?)?.toDouble() ?? 100,
+      height: (map['height'] as num?)?.toDouble() ?? 100,
+      rotation: (map['rotation'] as num?)?.toDouble() ?? 0,
+      data: Map<String, dynamic>.from(map['data'] ?? {}),
     );
+  }
+
+  factory GameObject.fromJson(Map<String, dynamic> json) {
+    return GameObject.fromMap(json);
   }
 }
