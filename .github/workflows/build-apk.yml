@@ -51,20 +51,6 @@ jobs:
       - name: Get Flutter dependencies
         run: flutter pub get
 
-      - name: Prepare Python environment
-        run: |
-          echo "SERIOUS_PYTHON_VERSION=3.12" >> "$GITHUB_ENV"
-          echo "SERIOUS_PYTHON_SITE_PACKAGES=$GITHUB_WORKSPACE/build/site-packages" >> "$GITHUB_ENV"
-          mkdir -p "$GITHUB_WORKSPACE/build/site-packages"
-          mkdir -p "$GITHUB_WORKSPACE/assets/python"
-
-      - name: Package Python app
-        run: |
-          rm -rf app
-          dart run serious_python:main package --asset assets/python/app.zip python/server -p Android --python-version 3.12
-          test -s assets/python/app.zip
-          unzip -t assets/python/app.zip >/dev/null
-
       - name: Build release APK
         run: flutter build apk --release
 

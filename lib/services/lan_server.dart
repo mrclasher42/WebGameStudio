@@ -1,24 +1,18 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:path_provider/path_provider.dart';
-import 'package:serious_python/serious_python.dart';
-
 class LanServerService {
   LanServerService._();
 
   static final LanServerService instance = LanServerService._();
 
-  Directory? _root;
-  File? _stopFile;
-  File? _portFile;
-  int? _port;
-  bool _running = false;
-  Future<void>? _pythonFuture;
+  HttpServer? _server;
+  String? _url;
+  String _document = '';
 
-  bool get isRunning => _running;
+  bool get isRunning => _server != null;
 
-  int? get port => _port;
+  String? get url => _url;
 
   Future<String> _findLocalIp() async {
     try {
@@ -52,103 +46,69 @@ class LanServerService {
       return html;
     }
 
-    final hasDocument = RegExp(
+    final hasHtml = RegExp(
       r'<html[\s>]',
       caseSensitive: false,
     ).hasMatch(html);
 
-    if (hasDocument) {
-      var document = html;
+    final style = css.trim().isEmpty
+        ? ''
+        : '<style>\n$css\n</style>';
 
-      final headStyle = '<style>\n$css\n</style>';
+    final script = js.trim().isEmpty
+        ? ''
+        : '<script>\n$js\n</script>';
 
-      if (css.trim().isNotEmpty &&
-          !RegExp(
-            r'<style[\s>]',
-            caseSensitive: false,
-          ).hasMatch(document)) {
-        if (RegExp(
-          r'</head>',
-          caseSensitive: false,
-        ).hasMatch(document)) {
-          document = document.replaceFirst(
-            RegExp(r'</head>', caseSensitive: false),
-            '$headStyle\n</head>',
-          );
-        } else {
-          document = '$headStyle\n$document';
-        }
-      }
-
-      if (js.trim().isNotEmpty) {
-        final script = '<script>\n$js\n</script>';
-
-        if (RegExp(
-          r'</body>',
-          caseSensitive: false,
-        ).hasMatch(document)) {
-          document = document.replaceFirst(
-            RegExp(r'</body>', caseSensitive: false),
-            '$script\n</body>',
-          );
-        } else {
-          document = '$document\n$script';
-        }
-      }
-
-      return document;
-    }
-
-    return '''<!DOCTYPE html>
+    if (!hasHtml) {
+      return '''<!doctype html>
 <html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>
-html, body {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  min-height: 100%;
-}
-* {
-  box-sizing: border-box;
-}
-$css
-</style>
+$style
 </head>
 <body>
 $html
-<script>
-$js
-</script>
+$script
 </body>
 </html>''';
-  }
-
-  Future<void> _writeProject({
-    required String html,
-    required String css,
-    required String js,
-    required bool singleFile,
-  }) async {
-    final root = _root;
-
-    if (root == null) {
-      return;
     }
 
-    final document = _buildDocument(
-      html: html,
-      css: css,
-      js: js,
-      singleFile: singleFile,
-    );
+    var document = html;
 
-    await File('${root.path}/index.html').writeAsString(
-      document,
-      flush: true,
-    );
+    if (style.isNotEmpty) {
+      final headPattern = RegExp(
+        r'</head>',
+        caseSensitive: false,
+      );
+
+      if (headPattern.hasMatch(document)) {
+        document = document.replaceFirst(
+          headPattern,
+          '$style\n</head>',
+        );
+      } else {
+        document = '$style\n$document';
+      }
+    }
+
+    if (script.isNotEmpty) {
+      final bodyPattern = RegExp(
+        r'</body>',
+        caseSensitive: false,
+      );
+
+      if (bodyPattern.hasMatch(document)) {
+        document = document.replaceFirst(
+          bodyPattern,
+          '$script\n</body>',
+        );
+      } else {
+        document = '$document\n$script';
+      }
+    }
+
+    return document;
   }
 
   Future<String> start({
@@ -158,95 +118,77 @@ $js
     required String js,
     required bool singleFile,
   }) async {
-    if (_running) {
-      final ip = await _findLocalIp();
-      return 'http://$ip:${_port ?? 8765}';
+    if (_server != null) {
+      await update(
+        html: html,
+        css: css,
+        js: js,
+        singleFile: singleFile,
+      );
+
+      return _url!;
     }
 
-    await stop();
-
-    final support = await getApplicationSupportDirectory();
-
-    final safeId = projectId.replaceAll(
-      RegExp(r'[^a-zA-Z0-9_-]'),
-      '_',
-    );
-
-    final root = Directory(
-      '${support.path}/data/lan_servers/$safeId',
-    );
-
-    await root.create(recursive: true);
-
-    _root = root;
-    _stopFile = File('${root.path}/.stop');
-    _portFile = File('${root.path}/.port');
-
-    await _writeProject(
+    _document = _buildDocument(
       html: html,
       css: css,
       js: js,
       singleFile: singleFile,
     );
 
-    final stopFile = _stopFile!;
-    final portFile = _portFile!;
+    final server = await HttpServer.bind(
+      InternetAddress.anyIPv4,
+      0,
+      shared: true,
+    );
 
-    await stopFile.delete().catchError((_) => stopFile);
-    await portFile.delete().catchError((_) => portFile);
+    _server = server;
 
-    try {
-      final future = SeriousPython.run(
-        'assets/python/app.zip',
-        appFileName: 'server.py',
-        environmentVariables: {
-          'WGS_ROOT': root.path,
-          'WGS_PORT': '8765',
-          'WGS_PORT_FILE': portFile.path,
-          'WGS_STOP_FILE': stopFile.path,
-        },
-      );
+    unawaited(
+      server.listen(
+        (request) async {
+          try {
+            request.response.headers.contentType = ContentType.html;
+            request.response.headers.set(
+              'Cache-Control',
+              'no-store, no-cache, must-revalidate',
+            );
+            request.response.headers.set(
+              'Pragma',
+              'no-cache',
+            );
+            request.response.headers.set(
+              'Access-Control-Allow-Origin',
+              '*',
+            );
 
-      _pythonFuture = future;
-
-      future.catchError((_) {});
-
-      int? detectedPort;
-
-      for (var i = 0; i < 50; i++) {
-        await Future<void>.delayed(
-          const Duration(milliseconds: 100),
-        );
-
-        if (await portFile.exists()) {
-          final value = await portFile.readAsString();
-
-          detectedPort = int.tryParse(value.trim());
-
-          if (detectedPort != null) {
-            break;
+            if (request.uri.path == '/' ||
+                request.uri.path == '/index.html') {
+              request.response.statusCode = HttpStatus.ok;
+              request.response.write(_document);
+            } else {
+              request.response.statusCode = HttpStatus.notFound;
+              request.response.write('Not Found');
+            }
+          } catch (_) {
+            try {
+              request.response.statusCode =
+                  HttpStatus.internalServerError;
+            } catch (_) {}
+          } finally {
+            try {
+              await request.response.close();
+            } catch (_) {}
           }
-        }
-      }
+        },
+      ),
+    );
 
-      if (detectedPort == null) {
-        throw Exception('فشل تشغيل Python LAN Server');
-      }
+    final ip = await _findLocalIp();
 
-      _port = detectedPort;
-      _running = true;
+    _url = 'http://$ip:${server.port}';
 
-      final ip = await _findLocalIp();
-
-      return 'http://$ip:$detectedPort';
-    } catch (e) {
-      _running = false;
-      _port = null;
-      _root = null;
-      _stopFile = null;
-      _portFile = null;
-      rethrow;
-    }
+    return _url!;
   }
 
   Future<void> update({
@@ -255,11 +197,11 @@ $js
     required String js,
     required bool singleFile,
   }) async {
-    if (!_running) {
+    if (_server == null) {
       return;
     }
 
-    await _writeProject(
+    _document = _buildDocument(
       html: html,
       css: css,
       js: js,
@@ -268,37 +210,18 @@ $js
   }
 
   Future<void> stop() async {
-    final stopFile = _stopFile;
+    final server = _server;
 
-    if (stopFile != null) {
-      try {
-        if (!await stopFile.exists()) {
-          await stopFile.writeAsString(
-            'stop',
-            flush: true,
-          );
-        }
-      } catch (_) {}
+    _server = null;
+    _url = null;
+    _document = '';
+
+    if (server == null) {
+      return;
     }
 
-    final pythonFuture = _pythonFuture;
-
-    if (pythonFuture != null) {
-      try {
-        await Future.any<void>([
-          pythonFuture,
-          Future<void>.delayed(
-            const Duration(milliseconds: 700),
-          ),
-        ]);
-      } catch (_) {}
-    }
-
-    _running = false;
-    _port = null;
-    _root = null;
-    _stopFile = null;
-    _portFile = null;
-    _pythonFuture = null;
+    try {
+      await server.close(force: true);
+    } catch (_) {}
   }
 }
