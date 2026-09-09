@@ -641,8 +641,7 @@ class _EditorScreenState extends State<EditorScreen> {
                                   color:
                                       Colors.green,
                                   fontWeight:
-                                      FontWeight
-                                          .700,
+                                      FontWeight.w700,
                                 ),
                               ),
                             ],
