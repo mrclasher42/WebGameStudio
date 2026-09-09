@@ -5,13 +5,19 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 class _LanForegroundTaskHandler extends TaskHandler {
   @override
-  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {}
+  Future<void> onStart(
+    DateTime timestamp,
+    TaskStarter starter,
+  ) async {}
 
   @override
   void onRepeatEvent(DateTime timestamp) {}
 
   @override
-  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {}
+  Future<void> onDestroy(
+    DateTime timestamp,
+    bool isTimeout,
+  ) async {}
 
   @override
   void onReceiveData(Object data) {}
@@ -70,6 +76,9 @@ class LanServerService {
   String? _url;
   String _document = '';
 
+  final Map<String, String> _files = {};
+  final Map<String, String> _assetData = {};
+  final Map<String, String> _assetMime = {};
   final Map<String, _Player> _players = {};
 
   bool _foregroundStarted = false;
@@ -77,6 +86,11 @@ class LanServerService {
   bool get isRunning => _server != null;
 
   String? get url => _url;
+
+  int get playerCount {
+    _cleanupPlayers();
+    return _players.length;
+  }
 
   String _buildDocument({
     required String html,
@@ -88,11 +102,6 @@ class LanServerService {
       return html;
     }
 
-    final hasHtml = RegExp(
-      r'<html[\s>]',
-      caseSensitive: false,
-    ).hasMatch(html);
-
     final style = css.trim().isEmpty
         ? ''
         : '<style>\n$css\n</style>';
@@ -100,6 +109,11 @@ class LanServerService {
     final script = js.trim().isEmpty
         ? ''
         : '<script>\n$js\n</script>';
+
+    final hasHtml = RegExp(
+      r'<html[\s>]',
+      caseSensitive: false,
+    ).hasMatch(html);
 
     if (!hasHtml) {
       return '''<!doctype html>
@@ -129,8 +143,6 @@ $script
           pattern,
           '$style\n</head>',
         );
-      } else {
-        document = '$style\n$document';
       }
     }
 
@@ -145,8 +157,6 @@ $script
           pattern,
           '$script\n</body>',
         );
-      } else {
-        document = '$document\n$script';
       }
     }
 
@@ -226,7 +236,7 @@ $script
         channelId: 'web_game_studio_lan',
         channelName: 'Web Game Studio LAN Server',
         channelDescription:
-            'Keeps the Web Game Studio LAN Server running in the background.',
+            'Keeps the Web Game Studio LAN Server running.',
         onlyAlertOnce: true,
       ),
       iosNotificationOptions: const IOSNotificationOptions(
@@ -245,10 +255,10 @@ $script
     );
 
     if (Platform.isAndroid) {
-      final notificationPermission =
+      final permission =
           await FlutterForegroundTask.checkNotificationPermission();
 
-      if (notificationPermission != NotificationPermission.granted) {
+      if (permission != NotificationPermission.granted) {
         await FlutterForegroundTask.requestNotificationPermission();
       }
 
@@ -286,11 +296,14 @@ $script
     final now = DateTime.now();
 
     _players.removeWhere(
-      (_, player) => now.difference(player.lastSeen).inSeconds > 5,
+      (_, player) =>
+          now.difference(player.lastSeen).inSeconds > 5,
     );
   }
 
-  Future<Map<String, dynamic>> _readJson(HttpRequest request) async {
+  Future<Map<String, dynamic>> _readJson(
+    HttpRequest request,
+  ) async {
     try {
       final body = await utf8.decoder.bind(request).join();
 
@@ -337,7 +350,157 @@ $script
     );
   }
 
-  Future<void> _handleRequest(HttpRequest request) async {
+  String _normalizePath(String path) {
+    var value = path;
+
+    if (value.startsWith('/')) {
+      value = value.substring(1);
+    }
+
+    value = Uri.decodeComponent(value);
+
+    while (value.startsWith('../')) {
+      value = value.substring(3);
+    }
+
+    return value;
+  }
+
+  ContentType _contentType(String path) {
+    final lower = path.toLowerCase();
+
+    if (lower.endsWith('.html') ||
+        lower.endsWith('.htm')) {
+      return ContentType(
+        'text',
+        'html',
+        charset: 'utf-8',
+      );
+    }
+
+    if (lower.endsWith('.css')) {
+      return ContentType(
+        'text',
+        'css',
+        charset: 'utf-8',
+      );
+    }
+
+    if (lower.endsWith('.js')) {
+      return ContentType(
+        'text',
+        'javascript',
+        charset: 'utf-8',
+      );
+    }
+
+    if (lower.endsWith('.json')) {
+      return ContentType(
+        'application',
+        'json',
+        charset: 'utf-8',
+      );
+    }
+
+    if (lower.endsWith('.png')) {
+      return ContentType('image', 'png');
+    }
+
+    if (lower.endsWith('.jpg') ||
+        lower.endsWith('.jpeg')) {
+      return ContentType('image', 'jpeg');
+    }
+
+    if (lower.endsWith('.gif')) {
+      return ContentType('image', 'gif');
+    }
+
+    if (lower.endsWith('.webp')) {
+      return ContentType('image', 'webp');
+    }
+
+    if (lower.endsWith('.svg')) {
+      return ContentType(
+        'image',
+        'svg+xml',
+        charset: 'utf-8',
+      );
+    }
+
+    if (lower.endsWith('.mp3')) {
+      return ContentType('audio', 'mpeg');
+    }
+
+    if (lower.endsWith('.wav')) {
+      return ContentType('audio', 'wav');
+    }
+
+    if (lower.endsWith('.ogg')) {
+      return ContentType('audio', 'ogg');
+    }
+
+    if (lower.endsWith('.mp4')) {
+      return ContentType('video', 'mp4');
+    }
+
+    if (lower.endsWith('.webm')) {
+      return ContentType('video', 'webm');
+    }
+
+    return ContentType(
+      'application',
+      'octet-stream',
+    );
+  }
+
+  Future<void> _serveFile(
+    HttpRequest request,
+    String path,
+  ) async {
+    final response = request.response;
+
+    final normalized = _normalizePath(path);
+
+    if (normalized.isEmpty) {
+      response.statusCode = HttpStatus.notFound;
+      await response.close();
+      return;
+    }
+
+    if (_assetData.containsKey(normalized)) {
+      final bytes = base64Decode(_assetData[normalized]!);
+
+      response.headers.contentType =
+          _assetMime[normalized] != null
+              ? ContentType.parse(_assetMime[normalized]!)
+              : _contentType(normalized);
+
+      response.statusCode = HttpStatus.ok;
+      response.add(bytes);
+      await response.close();
+      return;
+    }
+
+    if (_files.containsKey(normalized)) {
+      final content = _files[normalized]!;
+
+      response.headers.contentType =
+          _contentType(normalized);
+
+      response.statusCode = HttpStatus.ok;
+      response.write(content);
+      await response.close();
+      return;
+    }
+
+    response.statusCode = HttpStatus.notFound;
+    response.write('File not found');
+    await response.close();
+  }
+
+  Future<void> _handleRequest(
+    HttpRequest request,
+  ) async {
     final response = request.response;
 
     _headers(response);
@@ -355,29 +518,29 @@ $script
 
       if (request.method == 'GET' &&
           (path == '/' || path == '/index.html')) {
-        response.statusCode = HttpStatus.ok;
         response.headers.contentType = ContentType(
           'text',
           'html',
           charset: 'utf-8',
         );
+
+        response.statusCode = HttpStatus.ok;
         response.write(_document);
         await response.close();
         return;
       }
 
-      if (path == '/players' && request.method == 'GET') {
+      if (path == '/players' &&
+          request.method == 'GET') {
         response.headers.contentType = ContentType.json;
-
-        final players = _players.values
-            .map((player) => player.toJson())
-            .toList();
-
         response.statusCode = HttpStatus.ok;
+
         response.write(
           jsonEncode({
-            'players': players,
-            'count': players.length,
+            'players': _players.values
+                .map((player) => player.toJson())
+                .toList(),
+            'count': _players.length,
           }),
         );
 
@@ -385,48 +548,64 @@ $script
         return;
       }
 
-      if (path == '/join' && request.method == 'POST') {
+      if (path == '/join' &&
+          request.method == 'POST') {
         final data = await _readJson(request);
 
         final id = (data['id'] ?? '').toString();
+
         final name =
-            (data['name'] ?? 'Player').toString().trim();
+            (data['name'] ?? 'Player')
+                .toString()
+                .trim();
 
-        final x =
-            (data['x'] is num) ? (data['x'] as num).toDouble() : 50.0;
+        final x = data['x'] is num
+            ? (data['x'] as num).toDouble()
+            : 50.0;
 
-        final y =
-            (data['y'] is num) ? (data['y'] as num).toDouble() : 50.0;
+        final y = data['y'] is num
+            ? (data['y'] as num).toDouble()
+            : 50.0;
 
         final color =
             (data['color'] ?? '#4ade80').toString();
 
         if (id.isEmpty) {
-          response.statusCode = HttpStatus.badRequest;
+          response.statusCode =
+              HttpStatus.badRequest;
+
           response.write(
             jsonEncode({
               'ok': false,
               'error': 'Missing player id',
             }),
           );
+
           await response.close();
           return;
         }
 
         _players[id] = _Player(
           id: id,
-          name: name.isEmpty ? 'Player' : name.substring(
-            0,
-            name.length > 16 ? 16 : name.length,
-          ),
+          name: name.isEmpty
+              ? 'Player'
+              : name.substring(
+                  0,
+                  name.length > 16
+                      ? 16
+                      : name.length,
+                ),
           x: x.clamp(0.0, 100.0),
           y: y.clamp(0.0, 100.0),
           color: color,
           lastSeen: DateTime.now(),
         );
 
-        response.headers.contentType = ContentType.json;
+        response.headers.contentType =
+            ContentType.json;
+
         response.statusCode = HttpStatus.ok;
+
         response.write(
           jsonEncode({
             'ok': true,
@@ -440,77 +619,79 @@ $script
         return;
       }
 
-      if (path == '/update' && request.method == 'POST') {
+      if (path == '/update' &&
+          request.method == 'POST') {
         final data = await _readJson(request);
 
         final id = (data['id'] ?? '').toString();
 
-        if (id.isEmpty) {
-          response.statusCode = HttpStatus.badRequest;
-          response.write(
-            jsonEncode({
-              'ok': false,
-              'error': 'Missing player id',
-            }),
-          );
-          await response.close();
-          return;
-        }
-
         final player = _players[id];
 
-        if (player == null) {
-          response.statusCode = HttpStatus.notFound;
+        if (id.isEmpty || player == null) {
+          response.statusCode =
+              HttpStatus.notFound;
+
           response.write(
             jsonEncode({
               'ok': false,
               'error': 'Player not found',
             }),
           );
+
           await response.close();
           return;
         }
 
         if (data['x'] is num) {
           player.x =
-              (data['x'] as num).toDouble().clamp(0.0, 100.0);
+              (data['x'] as num)
+                  .toDouble()
+                  .clamp(0.0, 100.0);
         }
 
         if (data['y'] is num) {
           player.y =
-              (data['y'] as num).toDouble().clamp(0.0, 100.0);
+              (data['y'] as num)
+                  .toDouble()
+                  .clamp(0.0, 100.0);
         }
 
         if (data['name'] != null) {
-          final name = data['name'].toString().trim();
+          final name =
+              data['name'].toString().trim();
 
           if (name.isNotEmpty) {
             player.name = name.substring(
               0,
-              name.length > 16 ? 16 : name.length,
+              name.length > 16
+                  ? 16
+                  : name.length,
             );
           }
         }
 
         if (data['color'] != null) {
-          player.color = data['color'].toString();
+          player.color =
+              data['color'].toString();
         }
 
         player.lastSeen = DateTime.now();
 
-        response.headers.contentType = ContentType.json;
+        response.headers.contentType =
+            ContentType.json;
+
         response.statusCode = HttpStatus.ok;
+
         response.write(
-          jsonEncode({
-            'ok': true,
-          }),
+          jsonEncode({'ok': true}),
         );
 
         await response.close();
         return;
       }
 
-      if (path == '/leave' && request.method == 'POST') {
+      if (path == '/leave' &&
+          request.method == 'POST') {
         final data = await _readJson(request);
 
         final id = (data['id'] ?? '').toString();
@@ -519,11 +700,30 @@ $script
           _players.remove(id);
         }
 
-        response.headers.contentType = ContentType.json;
+        response.headers.contentType =
+            ContentType.json;
+
         response.statusCode = HttpStatus.ok;
+
+        response.write(
+          jsonEncode({'ok': true}),
+        );
+
+        await response.close();
+        return;
+      }
+
+      if (path == '/health' &&
+          request.method == 'GET') {
+        response.headers.contentType =
+            ContentType.json;
+
+        response.statusCode = HttpStatus.ok;
+
         response.write(
           jsonEncode({
             'ok': true,
+            'players': _players.length,
           }),
         );
 
@@ -531,16 +731,11 @@ $script
         return;
       }
 
-      if (path == '/health' && request.method == 'GET') {
-        response.headers.contentType = ContentType.json;
-        response.statusCode = HttpStatus.ok;
-        response.write(
-          jsonEncode({
-            'ok': true,
-            'players': _players.length,
-          }),
+      if (request.method == 'GET') {
+        await _serveFile(
+          request,
+          path,
         );
-        await response.close();
         return;
       }
 
@@ -549,7 +744,9 @@ $script
       await response.close();
     } catch (_) {
       try {
-        response.statusCode = HttpStatus.internalServerError;
+        response.statusCode =
+            HttpStatus.internalServerError;
+
         await response.close();
       } catch (_) {}
     }
@@ -561,6 +758,9 @@ $script
     required String css,
     required String js,
     required bool singleFile,
+    Map<String, String>? files,
+    Map<String, String>? assetData,
+    Map<String, String>? assetMime,
   }) async {
     if (_server != null) {
       await update(
@@ -568,6 +768,9 @@ $script
         css: css,
         js: js,
         singleFile: singleFile,
+        files: files,
+        assetData: assetData,
+        assetMime: assetMime,
       );
 
       return _url!;
@@ -579,6 +782,20 @@ $script
       js: js,
       singleFile: singleFile,
     );
+
+    _files
+      ..clear()
+      ..addAll(files ?? {});
+
+    _files['index.html'] = _document;
+
+    _assetData
+      ..clear()
+      ..addAll(assetData ?? {});
+
+    _assetMime
+      ..clear()
+      ..addAll(assetMime ?? {});
 
     HttpServer server;
 
@@ -618,6 +835,9 @@ $script
     required String css,
     required String js,
     required bool singleFile,
+    Map<String, String>? files,
+    Map<String, String>? assetData,
+    Map<String, String>? assetMime,
   }) async {
     if (_server == null) {
       return;
@@ -629,6 +849,20 @@ $script
       js: js,
       singleFile: singleFile,
     );
+
+    _files
+      ..clear()
+      ..addAll(files ?? {});
+
+    _files['index.html'] = _document;
+
+    _assetData
+      ..clear()
+      ..addAll(assetData ?? {});
+
+    _assetMime
+      ..clear()
+      ..addAll(assetMime ?? {});
   }
 
   Future<void> stop() async {
@@ -637,6 +871,10 @@ $script
     _server = null;
     _url = null;
     _document = '';
+
+    _files.clear();
+    _assetData.clear();
+    _assetMime.clear();
     _players.clear();
 
     if (server != null) {
