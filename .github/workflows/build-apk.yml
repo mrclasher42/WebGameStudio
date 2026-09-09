@@ -48,9 +48,6 @@ jobs:
           p.write_text(s)
           PY
 
-      - name: Get Flutter dependencies
-        run: flutter pub get
-
       - name: Prepare Python environment
         run: |
           echo "SERIOUS_PYTHON_VERSION=3.12" >> "$GITHUB_ENV"
@@ -59,14 +56,15 @@ jobs:
 
           mkdir -p "$GITHUB_WORKSPACE/build/site-packages"
           mkdir -p "$GITHUB_WORKSPACE/build/python-app"
+          mkdir -p "$GITHUB_WORKSPACE/assets/python"
 
       - name: Package Python app
         run: |
           dart run serious_python:main package python/server -p Android
+          test -f assets/python/app.zip
 
-      - name: Inspect Python package
-        run: |
-          find build -maxdepth 5 -type f | sort | head -200
+      - name: Get Flutter dependencies
+        run: flutter pub get
 
       - name: Build release APK
         run: flutter build apk --release
