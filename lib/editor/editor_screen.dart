@@ -533,10 +533,7 @@ class _EditorScreenState extends State<EditorScreen> {
     final referencedCss = <String>{};
     final referencedJs = <String>{};
 
-    final linkRegex = RegExp(
-      r'<link[^>]+href=["']([^"']+)["'][^>]*>',
-      caseSensitive: false,
-    );
+    final linkRegex = RegExp(r'<link[^>]+href=["\']([^"\']+)["\'][^>]*>');
 
     for (final match in linkRegex.allMatches(html)) {
       final path = normalizeReference(match.group(1)!);
@@ -552,10 +549,7 @@ class _EditorScreenState extends State<EditorScreen> {
       }
     }
 
-    final scriptRegex = RegExp(
-      r'<script[^>]+src=["\']([^"\']+)["\'][^>]*>\s*</script>',
-      caseSensitive: false,
-    );
+    final scriptRegex = RegExp(r'<script[^>]+src=["\']([^"\']+)["\'][^>]*>\s*</script>');
 
     for (final match in scriptRegex.allMatches(html)) {
       final path = normalizeReference(match.group(1)!);
