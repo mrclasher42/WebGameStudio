@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 class LanServerService {
@@ -13,28 +12,6 @@ class LanServerService {
   bool get isRunning => _server != null;
 
   String? get url => _url;
-
-  Future<String> _findLocalIp() async {
-    try {
-      final interfaces = await NetworkInterface.list(
-        includeLoopback: false,
-        type: InternetAddressType.IPv4,
-      );
-
-      for (final interface in interfaces) {
-        for (final address in interface.addresses) {
-          final ip = address.address;
-
-          if (!ip.startsWith('127.') &&
-              !ip.startsWith('169.254.')) {
-            return ip;
-          }
-        }
-      }
-    } catch (_) {}
-
-    return '127.0.0.1';
-  }
 
   String _buildDocument({
     required String html,
@@ -111,6 +88,28 @@ $script
     return document;
   }
 
+  Future<String> _findLocalIp() async {
+    try {
+      final interfaces = await NetworkInterface.list(
+        includeLoopback: false,
+        type: InternetAddressType.IPv4,
+      );
+
+      for (final interface in interfaces) {
+        for (final address in interface.addresses) {
+          final ip = address.address;
+
+          if (!ip.startsWith('127.') &&
+              !ip.startsWith('169.254.')) {
+            return ip;
+          }
+        }
+      }
+    } catch (_) {}
+
+    return '127.0.0.1';
+  }
+
   Future<String> start({
     required String projectId,
     required String html,
@@ -144,44 +143,53 @@ $script
 
     _server = server;
 
-    unawaited(
-      server.listen(
-        (request) async {
-          try {
-            request.response.headers.contentType = ContentType.html;
-            request.response.headers.set(
-              'Cache-Control',
-              'no-store, no-cache, must-revalidate',
-            );
-            request.response.headers.set(
-              'Pragma',
-              'no-cache',
-            );
-            request.response.headers.set(
-              'Access-Control-Allow-Origin',
-              '*',
-            );
+    server.listen(
+      (request) async {
+        try {
+          request.response.headers.contentType = ContentType(
+            'text',
+            'html',
+            charset: 'utf-8',
+          );
 
-            if (request.uri.path == '/' ||
-                request.uri.path == '/index.html') {
-              request.response.statusCode = HttpStatus.ok;
-              request.response.write(_document);
-            } else {
-              request.response.statusCode = HttpStatus.notFound;
-              request.response.write('Not Found');
-            }
-          } catch (_) {
-            try {
-              request.response.statusCode =
-                  HttpStatus.internalServerError;
-            } catch (_) {}
-          } finally {
-            try {
-              await request.response.close();
-            } catch (_) {}
+          request.response.headers.set(
+            'Cache-Control',
+            'no-store, no-cache, must-revalidate, max-age=0',
+          );
+
+          request.response.headers.set(
+            'Pragma',
+            'no-cache',
+          );
+
+          request.response.headers.set(
+            'Access-Control-Allow-Origin',
+            '*',
+          );
+
+          if (request.uri.path == '/' ||
+              request.uri.path == '/index.html') {
+            request.response.statusCode = HttpStatus.ok;
+            request.response.write(_document);
+          } else if (request.uri.path == '/favicon.ico') {
+            request.response.statusCode = HttpStatus.noContent;
+          } else {
+            request.response.statusCode = HttpStatus.notFound;
+            request.response.write('Not Found');
           }
-        },
-      ),
+        } catch (_) {
+          try {
+            request.response.statusCode =
+                HttpStatus.internalServerError;
+          } catch (_) {}
+        } finally {
+          try {
+            await request.response.close();
+          } catch (_) {}
+        }
+      },
+      onError: (_) {},
+      cancelOnError: false,
     );
 
     final ip = await _findLocalIp();
