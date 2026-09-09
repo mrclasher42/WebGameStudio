@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -32,6 +33,34 @@ void _lanForegroundTaskCallback() {
   );
 }
 
+class _Player {
+  String id;
+  String name;
+  double x;
+  double y;
+  String color;
+  DateTime lastSeen;
+
+  _Player({
+    required this.id,
+    required this.name,
+    required this.x,
+    required this.y,
+    required this.color,
+    required this.lastSeen,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'x': x,
+      'y': y,
+      'color': color,
+    };
+  }
+}
+
 class LanServerService {
   LanServerService._();
 
@@ -40,83 +69,14 @@ class LanServerService {
   HttpServer? _server;
   String? _url;
   String _document = '';
-  bool _foregroundInitialized = false;
+
+  final Map<String, _Player> _players = {};
+
+  bool _foregroundStarted = false;
 
   bool get isRunning => _server != null;
 
   String? get url => _url;
-
-  Future<void> _initForegroundService() async {
-    if (_foregroundInitialized) {
-      return;
-    }
-
-    FlutterForegroundTask.init(
-      androidNotificationOptions: AndroidNotificationOptions(
-        channelId: 'web_game_studio_lan',
-        channelName: 'Web Game Studio LAN Server',
-        channelDescription:
-            'Keeps the Web Game Studio LAN Server running in the background.',
-        onlyAlertOnce: true,
-      ),
-      iosNotificationOptions: const IOSNotificationOptions(
-        showNotification: false,
-        playSound: false,
-      ),
-      foregroundTaskOptions: ForegroundTaskOptions(
-        eventAction: ForegroundTaskEventAction.repeat(15000),
-        autoRunOnBoot: false,
-        autoRunOnMyPackageReplaced: false,
-        allowWakeLock: false,
-        allowWifiLock: true,
-        allowAutoRestart: true,
-        stopWithTask: false,
-      ),
-    );
-
-    _foregroundInitialized = true;
-  }
-
-  Future<void> _startForegroundService() async {
-    if (!Platform.isAndroid) {
-      return;
-    }
-
-    await _initForegroundService();
-
-    final permission =
-        await FlutterForegroundTask.checkNotificationPermission();
-
-    if (permission != NotificationPermission.granted) {
-      await FlutterForegroundTask.requestNotificationPermission();
-    }
-
-    if (await FlutterForegroundTask.isRunningService) {
-      return;
-    }
-
-    await FlutterForegroundTask.startService(
-      serviceId: 256,
-      serviceTypes: const [
-        ForegroundServiceTypes.connectedDevice,
-      ],
-      notificationTitle: 'Web Game Studio',
-      notificationText: 'LAN Server يعمل في الخلفية',
-      notificationIcon: null,
-      notificationInitialRoute: '/',
-      callback: _lanForegroundTaskCallback,
-    );
-  }
-
-  Future<void> _stopForegroundService() async {
-    if (!Platform.isAndroid) {
-      return;
-    }
-
-    if (await FlutterForegroundTask.isRunningService) {
-      await FlutterForegroundTask.stopService();
-    }
-  }
 
   String _buildDocument({
     required String html,
@@ -239,7 +199,11 @@ $script
           if (_isPrivateIpv4(ip)) {
             privateIp ??= ip;
 
-            if (interface.name.toLowerCase().contains('wlan')) {
+            final name = interface.name.toLowerCase();
+
+            if (name.contains('wlan') ||
+                name.contains('wifi') ||
+                name.contains('wi-fi')) {
               wlanIp ??= ip;
             }
           }
@@ -249,6 +213,345 @@ $script
       return wlanIp ?? privateIp ?? fallbackIp ?? '127.0.0.1';
     } catch (_) {
       return '127.0.0.1';
+    }
+  }
+
+  Future<void> _startForegroundService() async {
+    if (_foregroundStarted) {
+      return;
+    }
+
+    FlutterForegroundTask.init(
+      androidNotificationOptions: AndroidNotificationOptions(
+        channelId: 'web_game_studio_lan',
+        channelName: 'Web Game Studio LAN Server',
+        channelDescription:
+            'Keeps the Web Game Studio LAN Server running in the background.',
+        onlyAlertOnce: true,
+      ),
+      iosNotificationOptions: const IOSNotificationOptions(
+        showNotification: false,
+        playSound: false,
+      ),
+      foregroundTaskOptions: ForegroundTaskOptions(
+        eventAction: ForegroundTaskEventAction.repeat(15000),
+        autoRunOnBoot: false,
+        autoRunOnMyPackageReplaced: false,
+        allowWakeLock: false,
+        allowWifiLock: true,
+        allowAutoRestart: true,
+        stopWithTask: false,
+      ),
+    );
+
+    if (Platform.isAndroid) {
+      final notificationPermission =
+          await FlutterForegroundTask.checkNotificationPermission();
+
+      if (notificationPermission != NotificationPermission.granted) {
+        await FlutterForegroundTask.requestNotificationPermission();
+      }
+
+      await FlutterForegroundTask.startService(
+        serviceId: 256,
+        serviceTypes: const [
+          ForegroundServiceTypes.connectedDevice,
+        ],
+        notificationTitle: 'Web Game Studio',
+        notificationText: 'LAN Server يعمل في الخلفية',
+        notificationIcon: null,
+        notificationInitialRoute: '/',
+        callback: _lanForegroundTaskCallback,
+      );
+    }
+
+    _foregroundStarted = true;
+  }
+
+  Future<void> _stopForegroundService() async {
+    if (!_foregroundStarted) {
+      return;
+    }
+
+    if (Platform.isAndroid) {
+      try {
+        await FlutterForegroundTask.stopService();
+      } catch (_) {}
+    }
+
+    _foregroundStarted = false;
+  }
+
+  void _cleanupPlayers() {
+    final now = DateTime.now();
+
+    _players.removeWhere(
+      (_, player) => now.difference(player.lastSeen).inSeconds > 5,
+    );
+  }
+
+  Future<Map<String, dynamic>> _readJson(HttpRequest request) async {
+    try {
+      final body = await utf8.decoder.bind(request).join();
+
+      if (body.trim().isEmpty) {
+        return {};
+      }
+
+      final decoded = jsonDecode(body);
+
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+
+      return {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  void _headers(HttpResponse response) {
+    response.headers.set(
+      'Access-Control-Allow-Origin',
+      '*',
+    );
+
+    response.headers.set(
+      'Access-Control-Allow-Methods',
+      'GET, POST, OPTIONS',
+    );
+
+    response.headers.set(
+      'Access-Control-Allow-Headers',
+      'Content-Type',
+    );
+
+    response.headers.set(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, max-age=0',
+    );
+
+    response.headers.set(
+      'Pragma',
+      'no-cache',
+    );
+  }
+
+  Future<void> _handleRequest(HttpRequest request) async {
+    final response = request.response;
+
+    _headers(response);
+
+    try {
+      if (request.method == 'OPTIONS') {
+        response.statusCode = HttpStatus.noContent;
+        await response.close();
+        return;
+      }
+
+      _cleanupPlayers();
+
+      final path = request.uri.path;
+
+      if (request.method == 'GET' &&
+          (path == '/' || path == '/index.html')) {
+        response.statusCode = HttpStatus.ok;
+        response.headers.contentType = ContentType(
+          'text',
+          'html',
+          charset: 'utf-8',
+        );
+        response.write(_document);
+        await response.close();
+        return;
+      }
+
+      if (path == '/players' && request.method == 'GET') {
+        response.headers.contentType = ContentType.json;
+
+        final players = _players.values
+            .map((player) => player.toJson())
+            .toList();
+
+        response.statusCode = HttpStatus.ok;
+        response.write(
+          jsonEncode({
+            'players': players,
+            'count': players.length,
+          }),
+        );
+
+        await response.close();
+        return;
+      }
+
+      if (path == '/join' && request.method == 'POST') {
+        final data = await _readJson(request);
+
+        final id = (data['id'] ?? '').toString();
+        final name =
+            (data['name'] ?? 'Player').toString().trim();
+
+        final x =
+            (data['x'] is num) ? (data['x'] as num).toDouble() : 50.0;
+
+        final y =
+            (data['y'] is num) ? (data['y'] as num).toDouble() : 50.0;
+
+        final color =
+            (data['color'] ?? '#4ade80').toString();
+
+        if (id.isEmpty) {
+          response.statusCode = HttpStatus.badRequest;
+          response.write(
+            jsonEncode({
+              'ok': false,
+              'error': 'Missing player id',
+            }),
+          );
+          await response.close();
+          return;
+        }
+
+        _players[id] = _Player(
+          id: id,
+          name: name.isEmpty ? 'Player' : name.substring(
+            0,
+            name.length > 16 ? 16 : name.length,
+          ),
+          x: x.clamp(0.0, 100.0),
+          y: y.clamp(0.0, 100.0),
+          color: color,
+          lastSeen: DateTime.now(),
+        );
+
+        response.headers.contentType = ContentType.json;
+        response.statusCode = HttpStatus.ok;
+        response.write(
+          jsonEncode({
+            'ok': true,
+            'players': _players.values
+                .map((player) => player.toJson())
+                .toList(),
+          }),
+        );
+
+        await response.close();
+        return;
+      }
+
+      if (path == '/update' && request.method == 'POST') {
+        final data = await _readJson(request);
+
+        final id = (data['id'] ?? '').toString();
+
+        if (id.isEmpty) {
+          response.statusCode = HttpStatus.badRequest;
+          response.write(
+            jsonEncode({
+              'ok': false,
+              'error': 'Missing player id',
+            }),
+          );
+          await response.close();
+          return;
+        }
+
+        final player = _players[id];
+
+        if (player == null) {
+          response.statusCode = HttpStatus.notFound;
+          response.write(
+            jsonEncode({
+              'ok': false,
+              'error': 'Player not found',
+            }),
+          );
+          await response.close();
+          return;
+        }
+
+        if (data['x'] is num) {
+          player.x =
+              (data['x'] as num).toDouble().clamp(0.0, 100.0);
+        }
+
+        if (data['y'] is num) {
+          player.y =
+              (data['y'] as num).toDouble().clamp(0.0, 100.0);
+        }
+
+        if (data['name'] != null) {
+          final name = data['name'].toString().trim();
+
+          if (name.isNotEmpty) {
+            player.name = name.substring(
+              0,
+              name.length > 16 ? 16 : name.length,
+            );
+          }
+        }
+
+        if (data['color'] != null) {
+          player.color = data['color'].toString();
+        }
+
+        player.lastSeen = DateTime.now();
+
+        response.headers.contentType = ContentType.json;
+        response.statusCode = HttpStatus.ok;
+        response.write(
+          jsonEncode({
+            'ok': true,
+          }),
+        );
+
+        await response.close();
+        return;
+      }
+
+      if (path == '/leave' && request.method == 'POST') {
+        final data = await _readJson(request);
+
+        final id = (data['id'] ?? '').toString();
+
+        if (id.isNotEmpty) {
+          _players.remove(id);
+        }
+
+        response.headers.contentType = ContentType.json;
+        response.statusCode = HttpStatus.ok;
+        response.write(
+          jsonEncode({
+            'ok': true,
+          }),
+        );
+
+        await response.close();
+        return;
+      }
+
+      if (path == '/health' && request.method == 'GET') {
+        response.headers.contentType = ContentType.json;
+        response.statusCode = HttpStatus.ok;
+        response.write(
+          jsonEncode({
+            'ok': true,
+            'players': _players.length,
+          }),
+        );
+        await response.close();
+        return;
+      }
+
+      response.statusCode = HttpStatus.notFound;
+      response.write('Not Found');
+      await response.close();
+    } catch (_) {
+      try {
+        response.statusCode = HttpStatus.internalServerError;
+        await response.close();
+      } catch (_) {}
     }
   }
 
@@ -269,8 +572,6 @@ $script
 
       return _url!;
     }
-
-    await _startForegroundService();
 
     _document = _buildDocument(
       html: html,
@@ -298,54 +599,7 @@ $script
     _server = server;
 
     server.listen(
-      (request) async {
-        final response = request.response;
-
-        try {
-          response.headers.contentType = ContentType(
-            'text',
-            'html',
-            charset: 'utf-8',
-          );
-
-          response.headers.set(
-            'Cache-Control',
-            'no-store, no-cache, must-revalidate, max-age=0',
-          );
-
-          response.headers.set(
-            'Pragma',
-            'no-cache',
-          );
-
-          response.headers.set(
-            'Access-Control-Allow-Origin',
-            '*',
-          );
-
-          response.persistentConnection = false;
-
-          if (request.uri.path == '/' ||
-              request.uri.path == '/index.html') {
-            response.statusCode = HttpStatus.ok;
-            response.write(_document);
-          } else if (request.uri.path == '/favicon.ico') {
-            response.statusCode = HttpStatus.noContent;
-          } else {
-            response.statusCode = HttpStatus.notFound;
-            response.write('Not Found');
-          }
-        } catch (_) {
-          try {
-            response.statusCode =
-                HttpStatus.internalServerError;
-          } catch (_) {}
-        }
-
-        try {
-          await response.close();
-        } catch (_) {}
-      },
+      _handleRequest,
       onError: (_) {},
       cancelOnError: false,
     );
@@ -353,6 +607,8 @@ $script
     final ip = await _findLocalIp();
 
     _url = 'http://$ip:${server.port}';
+
+    await _startForegroundService();
 
     return _url!;
   }
@@ -381,6 +637,7 @@ $script
     _server = null;
     _url = null;
     _document = '';
+    _players.clear();
 
     if (server != null) {
       try {
