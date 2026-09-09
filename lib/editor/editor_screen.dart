@@ -528,6 +528,7 @@ $html
             fontFamily: 'monospace',
             fontSize: 14,
             height: 1.55,
+            letterSpacing: 0.15,
             color: dark
                 ? Colors.white
                 : const Color(0xFF20222B),

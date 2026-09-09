@@ -25,6 +25,8 @@ server = None
 for port in range(start_port, start_port + 20):
     try:
         server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+        server.daemon_threads = True
+        server.allow_reuse_address = True
         port_file.write_text(str(port), encoding="utf-8")
         break
     except OSError:
@@ -37,16 +39,19 @@ def watch_stop():
     while True:
         if stop_file.exists():
             try:
-                server.shutdown()
+                threading.Thread(
+                    target=server.shutdown,
+                    daemon=True,
+                ).start()
             except Exception:
                 pass
             return
-        time.sleep(0.25)
+        time.sleep(0.15)
 
 threading.Thread(target=watch_stop, daemon=True).start()
 
 try:
-    server.serve_forever()
+    server.serve_forever(poll_interval=0.05)
 finally:
     server.server_close()
     port_file.unlink(missing_ok=True)

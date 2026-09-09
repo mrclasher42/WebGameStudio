@@ -14,6 +14,7 @@ class LanServerService {
   File? _portFile;
   int? _port;
   bool _running = false;
+  Future<void>? _pythonFuture;
 
   bool get isRunning => _running;
 
@@ -41,6 +42,90 @@ class LanServerService {
     return '127.0.0.1';
   }
 
+  String _buildDocument({
+    required String html,
+    required String css,
+    required String js,
+    required bool singleFile,
+  }) {
+    if (singleFile) {
+      return html;
+    }
+
+    final hasDocument = RegExp(
+      r'<html[\s>]',
+      caseSensitive: false,
+    ).hasMatch(html);
+
+    if (hasDocument) {
+      var document = html;
+
+      final headStyle = '<style>\n$css\n</style>';
+
+      if (css.trim().isNotEmpty &&
+          !RegExp(
+            r'<style[\s>]',
+            caseSensitive: false,
+          ).hasMatch(document)) {
+        if (RegExp(
+          r'</head>',
+          caseSensitive: false,
+        ).hasMatch(document)) {
+          document = document.replaceFirst(
+            RegExp(r'</head>', caseSensitive: false),
+            '$headStyle\n</head>',
+          );
+        } else {
+          document = '$headStyle\n$document';
+        }
+      }
+
+      if (js.trim().isNotEmpty) {
+        final script = '<script>\n$js\n</script>';
+
+        if (RegExp(
+          r'</body>',
+          caseSensitive: false,
+        ).hasMatch(document)) {
+          document = document.replaceFirst(
+            RegExp(r'</body>', caseSensitive: false),
+            '$script\n</body>',
+          );
+        } else {
+          document = '$document\n$script';
+        }
+      }
+
+      return document;
+    }
+
+    return '''<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100%;
+}
+* {
+  box-sizing: border-box;
+}
+$css
+</style>
+</head>
+<body>
+$html
+<script>
+$js
+</script>
+</body>
+</html>''';
+  }
+
   Future<void> _writeProject({
     required String html,
     required String css,
@@ -53,22 +138,17 @@ class LanServerService {
       return;
     }
 
-    await File('${root.path}/index.html').writeAsString(
-      html,
-      flush: true,
+    final document = _buildDocument(
+      html: html,
+      css: css,
+      js: js,
+      singleFile: singleFile,
     );
 
-    if (!singleFile) {
-      await File('${root.path}/style.css').writeAsString(
-        css,
-        flush: true,
-      );
-
-      await File('${root.path}/script.js').writeAsString(
-        js,
-        flush: true,
-      );
-    }
+    await File('${root.path}/index.html').writeAsString(
+      document,
+      flush: true,
+    );
   }
 
   Future<String> start({
@@ -78,6 +158,11 @@ class LanServerService {
     required String js,
     required bool singleFile,
   }) async {
+    if (_running) {
+      final ip = await _findLocalIp();
+      return 'http://$ip:${_port ?? 8765}';
+    }
+
     await stop();
 
     final support = await getApplicationSupportDirectory();
@@ -104,58 +189,64 @@ class LanServerService {
       singleFile: singleFile,
     );
 
-    if (await _stopFile!.exists()) {
-      await _stopFile!.delete();
-    }
+    final stopFile = _stopFile!;
+    final portFile = _portFile!;
 
-    if (await _portFile!.exists()) {
-      await _portFile!.delete();
-    }
+    await stopFile.delete().catchError((_) => stopFile);
+    await portFile.delete().catchError((_) => portFile);
 
-    unawaited(
-      SeriousPython.run(
+    try {
+      final future = SeriousPython.run(
         'assets/python/app.zip',
         appFileName: 'server.py',
         environmentVariables: {
           'WGS_ROOT': root.path,
           'WGS_PORT': '8765',
-          'WGS_PORT_FILE': _portFile!.path,
-          'WGS_STOP_FILE': _stopFile!.path,
+          'WGS_PORT_FILE': portFile.path,
+          'WGS_STOP_FILE': stopFile.path,
         },
-      ),
-    );
-
-    int? detectedPort;
-
-    for (var i = 0; i < 80; i++) {
-      await Future<void>.delayed(
-        const Duration(milliseconds: 100),
       );
 
-      if (await _portFile!.exists()) {
-        final value = await _portFile!.readAsString();
+      _pythonFuture = future;
 
-        detectedPort = int.tryParse(value.trim());
+      future.catchError((_) {});
 
-        if (detectedPort != null) {
-          break;
+      int? detectedPort;
+
+      for (var i = 0; i < 50; i++) {
+        await Future<void>.delayed(
+          const Duration(milliseconds: 100),
+        );
+
+        if (await portFile.exists()) {
+          final value = await portFile.readAsString();
+
+          detectedPort = int.tryParse(value.trim());
+
+          if (detectedPort != null) {
+            break;
+          }
         }
       }
+
+      if (detectedPort == null) {
+        throw Exception('فشل تشغيل Python LAN Server');
+      }
+
+      _port = detectedPort;
+      _running = true;
+
+      final ip = await _findLocalIp();
+
+      return 'http://$ip:$detectedPort';
+    } catch (e) {
+      _running = false;
+      _port = null;
+      _root = null;
+      _stopFile = null;
+      _portFile = null;
+      rethrow;
     }
-
-    if (detectedPort == null) {
-      await stop();
-      throw Exception(
-        'تعذر تشغيل Python LAN Server',
-      );
-    }
-
-    _port = detectedPort;
-    _running = true;
-
-    final ip = await _findLocalIp();
-
-    return 'http://$ip:$detectedPort';
   }
 
   Future<void> update({
@@ -181,21 +272,33 @@ class LanServerService {
 
     if (stopFile != null) {
       try {
-        await stopFile.writeAsString(
-          'stop',
-          flush: true,
-        );
+        if (!await stopFile.exists()) {
+          await stopFile.writeAsString(
+            'stop',
+            flush: true,
+          );
+        }
       } catch (_) {}
     }
 
-    await Future<void>.delayed(
-      const Duration(milliseconds: 300),
-    );
+    final pythonFuture = _pythonFuture;
+
+    if (pythonFuture != null) {
+      try {
+        await Future.any<void>([
+          pythonFuture,
+          Future<void>.delayed(
+            const Duration(milliseconds: 700),
+          ),
+        ]);
+      } catch (_) {}
+    }
 
     _running = false;
     _port = null;
     _root = null;
     _stopFile = null;
     _portFile = null;
+    _pythonFuture = null;
   }
 }
