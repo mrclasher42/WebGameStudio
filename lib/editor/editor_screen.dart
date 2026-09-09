@@ -534,7 +534,7 @@ class _EditorScreenState extends State<EditorScreen> {
     final referencedJs = <String>{};
 
     final linkRegex = RegExp(
-      r'<link[^>]+href=["\']([^"\']+)["\'][^>]*>',
+      r'<link[^>]+href=["']([^"']+)["'][^>]*>',
       caseSensitive: false,
     );
 
