@@ -1,5 +1,37 @@
 import 'dart:io';
 
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+
+class _LanForegroundTaskHandler extends TaskHandler {
+  @override
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {}
+
+  @override
+  void onRepeatEvent(DateTime timestamp) {}
+
+  @override
+  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {}
+
+  @override
+  void onReceiveData(Object data) {}
+
+  @override
+  void onNotificationButtonPressed(String id) {}
+
+  @override
+  void onNotificationPressed() {}
+
+  @override
+  void onNotificationDismissed() {}
+}
+
+@pragma('vm:entry-point')
+void _lanForegroundTaskCallback() {
+  FlutterForegroundTask.setTaskHandler(
+    _LanForegroundTaskHandler(),
+  );
+}
+
 class LanServerService {
   LanServerService._();
 
@@ -8,10 +40,83 @@ class LanServerService {
   HttpServer? _server;
   String? _url;
   String _document = '';
+  bool _foregroundInitialized = false;
 
   bool get isRunning => _server != null;
 
   String? get url => _url;
+
+  Future<void> _initForegroundService() async {
+    if (_foregroundInitialized) {
+      return;
+    }
+
+    FlutterForegroundTask.init(
+      androidNotificationOptions: AndroidNotificationOptions(
+        channelId: 'web_game_studio_lan',
+        channelName: 'Web Game Studio LAN Server',
+        channelDescription:
+            'Keeps the Web Game Studio LAN Server running in the background.',
+        onlyAlertOnce: true,
+      ),
+      iosNotificationOptions: const IOSNotificationOptions(
+        showNotification: false,
+        playSound: false,
+      ),
+      foregroundTaskOptions: const ForegroundTaskOptions(
+        eventAction: ForegroundTaskEventAction.repeat(15000),
+        autoRunOnBoot: false,
+        autoRunOnMyPackageReplaced: false,
+        allowWakeLock: false,
+        allowWifiLock: true,
+        allowAutoRestart: true,
+        stopWithTask: false,
+      ),
+    );
+
+    _foregroundInitialized = true;
+  }
+
+  Future<void> _startForegroundService() async {
+    if (!Platform.isAndroid) {
+      return;
+    }
+
+    await _initForegroundService();
+
+    final permission =
+        await FlutterForegroundTask.checkNotificationPermission();
+
+    if (permission != NotificationPermission.granted) {
+      await FlutterForegroundTask.requestNotificationPermission();
+    }
+
+    if (await FlutterForegroundTask.isRunningService) {
+      return;
+    }
+
+    await FlutterForegroundTask.startService(
+      serviceId: 256,
+      serviceTypes: const [
+        ForegroundServiceTypes.connectedDevice,
+      ],
+      notificationTitle: 'Web Game Studio',
+      notificationText: 'LAN Server يعمل في الخلفية',
+      notificationIcon: null,
+      notificationInitialRoute: '/',
+      callback: _lanForegroundTaskCallback,
+    );
+  }
+
+  Future<void> _stopForegroundService() async {
+    if (!Platform.isAndroid) {
+      return;
+    }
+
+    if (await FlutterForegroundTask.isRunningService) {
+      await FlutterForegroundTask.stopService();
+    }
+  }
 
   String _buildDocument({
     required String html,
@@ -41,7 +146,7 @@ class LanServerService {
 <html>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
 $style
 </head>
 <body>
@@ -54,14 +159,14 @@ $script
     var document = html;
 
     if (style.isNotEmpty) {
-      final headPattern = RegExp(
+      final pattern = RegExp(
         r'</head>',
         caseSensitive: false,
       );
 
-      if (headPattern.hasMatch(document)) {
+      if (pattern.hasMatch(document)) {
         document = document.replaceFirst(
-          headPattern,
+          pattern,
           '$style\n</head>',
         );
       } else {
@@ -70,14 +175,14 @@ $script
     }
 
     if (script.isNotEmpty) {
-      final bodyPattern = RegExp(
+      final pattern = RegExp(
         r'</body>',
         caseSensitive: false,
       );
 
-      if (bodyPattern.hasMatch(document)) {
+      if (pattern.hasMatch(document)) {
         document = document.replaceFirst(
-          bodyPattern,
+          pattern,
           '$script\n</body>',
         );
       } else {
@@ -88,6 +193,27 @@ $script
     return document;
   }
 
+  bool _isPrivateIpv4(String ip) {
+    final parts = ip.split('.');
+
+    if (parts.length != 4) {
+      return false;
+    }
+
+    final numbers = parts.map(int.tryParse).toList();
+
+    if (numbers.any((value) => value == null)) {
+      return false;
+    }
+
+    final a = numbers[0]!;
+    final b = numbers[1]!;
+
+    return a == 10 ||
+        (a == 172 && b >= 16 && b <= 31) ||
+        (a == 192 && b == 168);
+  }
+
   Future<String> _findLocalIp() async {
     try {
       final interfaces = await NetworkInterface.list(
@@ -95,19 +221,35 @@ $script
         type: InternetAddressType.IPv4,
       );
 
+      String? privateIp;
+      String? wlanIp;
+      String? fallbackIp;
+
       for (final interface in interfaces) {
         for (final address in interface.addresses) {
           final ip = address.address;
 
-          if (!ip.startsWith('127.') &&
-              !ip.startsWith('169.254.')) {
-            return ip;
+          if (ip.startsWith('127.') ||
+              ip.startsWith('169.254.')) {
+            continue;
+          }
+
+          fallbackIp ??= ip;
+
+          if (_isPrivateIpv4(ip)) {
+            privateIp ??= ip;
+
+            if (interface.name.toLowerCase().contains('wlan')) {
+              wlanIp ??= ip;
+            }
           }
         }
       }
-    } catch (_) {}
 
-    return '127.0.0.1';
+      return wlanIp ?? privateIp ?? fallbackIp ?? '127.0.0.1';
+    } catch (_) {
+      return '127.0.0.1';
+    }
   }
 
   Future<String> start({
@@ -128,6 +270,8 @@ $script
       return _url!;
     }
 
+    await _startForegroundService();
+
     _document = _buildDocument(
       html: html,
       css: css,
@@ -135,58 +279,72 @@ $script
       singleFile: singleFile,
     );
 
-    final server = await HttpServer.bind(
-      InternetAddress.anyIPv4,
-      0,
-      shared: true,
-    );
+    HttpServer server;
+
+    try {
+      server = await HttpServer.bind(
+        InternetAddress.anyIPv4,
+        8080,
+        shared: false,
+      );
+    } catch (_) {
+      server = await HttpServer.bind(
+        InternetAddress.anyIPv4,
+        0,
+        shared: false,
+      );
+    }
 
     _server = server;
 
     server.listen(
       (request) async {
+        final response = request.response;
+
         try {
-          request.response.headers.contentType = ContentType(
+          response.headers.contentType = ContentType(
             'text',
             'html',
             charset: 'utf-8',
           );
 
-          request.response.headers.set(
+          response.headers.set(
             'Cache-Control',
             'no-store, no-cache, must-revalidate, max-age=0',
           );
 
-          request.response.headers.set(
+          response.headers.set(
             'Pragma',
             'no-cache',
           );
 
-          request.response.headers.set(
+          response.headers.set(
             'Access-Control-Allow-Origin',
             '*',
           );
 
+          response.persistentConnection = false;
+
           if (request.uri.path == '/' ||
               request.uri.path == '/index.html') {
-            request.response.statusCode = HttpStatus.ok;
-            request.response.write(_document);
+            response.statusCode = HttpStatus.ok;
+            response.write(_document);
           } else if (request.uri.path == '/favicon.ico') {
-            request.response.statusCode = HttpStatus.noContent;
+            response.statusCode = HttpStatus.noContent;
           } else {
-            request.response.statusCode = HttpStatus.notFound;
-            request.response.write('Not Found');
+            response.statusCode = HttpStatus.notFound;
+            response.write('Not Found');
           }
         } catch (_) {
           try {
-            request.response.statusCode =
+            response.statusCode =
                 HttpStatus.internalServerError;
           } catch (_) {}
-        } finally {
-          try {
-            await request.response.close();
-          } catch (_) {}
         }
+
+        try {
+          await response.close();
+        } catch (_) {}
       },
       onError: (_) {},
       cancelOnError: false,
@@ -224,12 +382,12 @@ $script
     _url = null;
     _document = '';
 
-    if (server == null) {
-      return;
+    if (server != null) {
+      try {
+        await server.close(force: true);
+      } catch (_) {}
     }
 
-    try {
-      await server.close(force: true);
-    } catch (_) {}
+    await _stopForegroundService();
   }
 }

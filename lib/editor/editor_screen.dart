@@ -122,6 +122,15 @@ class _EditorScreenState extends State<EditorScreen> {
   void markChanged() {
     hasChanges = true;
     scheduleAutoSave();
+
+    if (_lanServerRunning) {
+      LanServerService.instance.update(
+        html: getCurrentHtml(),
+        css: getCurrentCss(),
+        js: getCurrentJs(),
+        singleFile: singleFileMode,
+      );
+    }
   }
 
   void scheduleAutoSave() {
@@ -333,7 +342,7 @@ $html
       'Promise Error\\n' +
       String(event.reason || 'Unknown promise error')
     );
-  };
+  });
 
   const originalConsoleError = console.error;
 
@@ -434,7 +443,7 @@ $html
       'Promise Error\\n' +
       String(event.reason || 'Unknown promise error')
     );
-  };
+  });
 
   const originalConsoleError = console.error;
 
@@ -537,6 +546,11 @@ $html
               ? const Color(0xFF15171C)
               : const Color(0xFFFAFAFC),
           padding: const EdgeInsets.all(16),
+          lineNumberStyle: const LineNumberStyle(
+            width: 60,
+            margin: 8,
+            textAlign: TextAlign.right,
+          ),
           cursorColor: Theme.of(context).colorScheme.primary,
           keyboardType: TextInputType.multiline,
         ),
